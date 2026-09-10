@@ -5,146 +5,194 @@
     {
       "name": "kai",
       "file": "kai.glb",
-      "bytes": 111068,
-      "meshFaces": 600
+      "bytes": 141912,
+      "meshFaces": 2498,
+      "triangles": 4076,
+      "meshes": 16
     },
     {
       "name": "bolt",
       "file": "bolt.glb",
-      "bytes": 44752,
-      "meshFaces": 108
+      "bytes": 71592,
+      "meshFaces": 846,
+      "triangles": 1812,
+      "meshes": 11
     },
     {
       "name": "zombie_dog",
       "file": "zombie_dog.glb",
-      "bytes": 48800,
-      "meshFaces": 124
+      "bytes": 66660,
+      "meshFaces": 754,
+      "triangles": 1636,
+      "meshes": 11
     },
     {
       "name": "rust_drone",
       "file": "rust_drone.glb",
-      "bytes": 92496,
-      "meshFaces": 190
+      "bytes": 106188,
+      "meshFaces": 1982,
+      "triangles": 3308,
+      "meshes": 12
     },
     {
       "name": "rust_scout",
       "file": "rust_scout.glb",
-      "bytes": 111128,
-      "meshFaces": 600
+      "bytes": 141968,
+      "meshFaces": 2498,
+      "triangles": 4076,
+      "meshes": 16
     },
     {
       "name": "lighthouse",
       "file": "lighthouse.glb",
-      "bytes": 48304,
-      "meshFaces": 262
+      "bytes": 76984,
+      "meshFaces": 688,
+      "triangles": 1816,
+      "meshes": 4
     },
     {
       "name": "energy_cell",
       "file": "energy_cell.glb",
-      "bytes": 26772,
-      "meshFaces": 54
+      "bytes": 16804,
+      "meshFaces": 150,
+      "triangles": 348,
+      "meshes": 3
     },
     {
       "name": "turret",
       "file": "turret.glb",
-      "bytes": 20916,
-      "meshFaces": 126
+      "bytes": 18420,
+      "meshFaces": 366,
+      "triangles": 468,
+      "meshes": 3
     },
     {
       "name": "rocket",
       "file": "rocket.glb",
-      "bytes": 38948,
-      "meshFaces": 80
+      "bytes": 51212,
+      "meshFaces": 674,
+      "triangles": 1460,
+      "meshes": 4
     },
     {
       "name": "crab",
       "file": "crab.glb",
-      "bytes": 58404,
-      "meshFaces": 460
+      "bytes": 28476,
+      "meshFaces": 700,
+      "triangles": 808,
+      "meshes": 2
     },
     {
       "name": "beacon",
       "file": "beacon.glb",
-      "bytes": 17784,
-      "meshFaces": 112
+      "bytes": 16436,
+      "meshFaces": 352,
+      "triangles": 424,
+      "meshes": 3
     },
     {
       "name": "palm",
       "file": "palm.glb",
-      "bytes": 58416,
-      "meshFaces": 54
+      "bytes": 30004,
+      "meshFaces": 390,
+      "triangles": 792,
+      "meshes": 2
     },
     {
       "name": "octopus",
       "file": "octopus.glb",
-      "bytes": 247604,
-      "meshFaces": 2320
+      "bytes": 159212,
+      "meshFaces": 5052,
+      "triangles": 5064,
+      "meshes": 29
     },
     {
       "name": "starfish",
       "file": "starfish.glb",
-      "bytes": 20568,
-      "meshFaces": 180
+      "bytes": 35792,
+      "meshFaces": 992,
+      "triangles": 1004,
+      "meshes": 3
     },
     {
       "name": "snail",
       "file": "snail.glb",
-      "bytes": 87820,
-      "meshFaces": 740
+      "bytes": 85028,
+      "meshFaces": 2208,
+      "triangles": 2832,
+      "meshes": 5
     },
     {
       "name": "clam",
       "file": "clam.glb",
-      "bytes": 45296,
-      "meshFaces": 400
+      "bytes": 64908,
+      "meshFaces": 1726,
+      "triangles": 2332,
+      "meshes": 6
     },
     {
       "name": "coral_cluster",
       "file": "coral_cluster.glb",
-      "bytes": 56960,
-      "meshFaces": 410
+      "bytes": 30868,
+      "meshFaces": 650,
+      "triangles": 812,
+      "meshes": 3
     },
     {
       "name": "reef_arch",
       "file": "reef_arch.glb",
-      "bytes": 47320,
-      "meshFaces": 306
+      "bytes": 35360,
+      "meshFaces": 858,
+      "triangles": 1092,
+      "meshes": 4
     },
     {
       "name": "salvage_tower",
       "file": "salvage_tower.glb",
-      "bytes": 63572,
-      "meshFaces": 156
+      "bytes": 56500,
+      "meshFaces": 792,
+      "triangles": 1584,
+      "meshes": 5
     },
     {
       "name": "moon_mushroom",
       "file": "moon_mushroom.glb",
-      "bytes": 60244,
-      "meshFaces": 510
+      "bytes": 63992,
+      "meshFaces": 1950,
+      "triangles": 2004,
+      "meshes": 4
     },
     {
       "name": "software_disc",
       "file": "software_disc.glb",
-      "bytes": 59968,
-      "meshFaces": 520
+      "bytes": 49032,
+      "meshFaces": 768,
+      "triangles": 1536,
+      "meshes": 3
     },
     {
       "name": "prism_armor",
       "file": "prism_armor.glb",
-      "bytes": 35920,
-      "meshFaces": 246
+      "bytes": 42508,
+      "meshFaces": 990,
+      "triangles": 1260,
+      "meshes": 5
     },
     {
       "name": "twin_thrusters",
       "file": "twin_thrusters.glb",
-      "bytes": 21048,
-      "meshFaces": 54
+      "bytes": 51496,
+      "meshFaces": 786,
+      "triangles": 1620,
+      "meshes": 3
     },
     {
       "name": "halo_antenna",
       "file": "halo_antenna.glb",
-      "bytes": 30244,
-      "meshFaces": 220
+      "bytes": 16088,
+      "meshFaces": 244,
+      "triangles": 424,
+      "meshes": 3
     }
   ]
 }

@@ -104,6 +104,23 @@ try {
   await mobile.evaluate(() => { const api = window.__ROBOT_BEACH__; api.game.begin(api.expeditions[2]); api.ui.hideDialogue(); });
   await mobile.waitForTimeout(1000);
   await mobile.screenshot({ path: join(OUT, "15-expedition-landscape.png") });
+  // Inspection-only close-up: gameplay keeps the compact proportions.
+  await page.addStyleTag({ content: "#app > :not(#game) { visibility: hidden !important; }" });
+  await page.evaluate(() => {
+    const { game, world } = window.__ROBOT_BEACH__;
+    game.stop(); world.clearMission(); world.landmarks.visible = false;
+    world.setQuality("high");
+    for (const [name, x, label] of [["octopus", -5, "Octopus"], ["starfish", -2.5, "Starfish"], ["snail", 0, "NORI"], ["clam", 2.5, "Clam"], ["software_disc", 5, "Software CD"]]) {
+      const actor = world.createActor(name, { x, z: 0 }, 1, world.mission, { nativeScale: true });
+      world.animateSeaLife(actor, 0);
+      const caption = world.label(actor, label, 0xffffff, 2);
+      caption.scale.set(2, 0.38, 1);
+    }
+    world.camera.position.set(0, 6.5, 12.5); world.camera.lookAt(0, 0.75, 0);
+    world.update = () => world.renderer.render(world.scene, world.camera);
+    world.update();
+  });
+  await page.screenshot({ path: join(OUT, "16-detail-inspection.png") });
   console.log(`Visual captures written to ${OUT}`);
 } finally {
   if (browser) await browser.close();

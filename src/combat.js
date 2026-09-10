@@ -1,4 +1,7 @@
 import * as THREE from "three";
+import { actorHeight } from "./presentation.js";
+
+const aimHeight = entity => actorHeight(entity.object, entity.variant === "drone" ? 0.38 : entity.variant === "dog" ? 0.8 : 1.35);
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const hostile = entity => entity.active && ["enemy", "boss"].includes(entity.kind);
@@ -65,11 +68,11 @@ export class Combat {
       const object = new THREE.Group();
       const material = new THREE.MeshStandardMaterial({ color: data.color, emissive: data.color, emissiveIntensity: 0.5, roughness: 0.3 });
       const geometry = type === "freeze" ? new THREE.IcosahedronGeometry(0.5, 0) : type === "whistle" ? new THREE.TorusGeometry(0.4, 0.15, 8, 14) : new THREE.BoxGeometry(0.85, 0.65, 0.55);
-      const mesh = new THREE.Mesh(geometry, material); mesh.position.y = 1.0; object.add(mesh);
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.09, 6, 24), new THREE.MeshBasicMaterial({ color: data.color }));
+      const mesh = new THREE.Mesh(geometry, material); mesh.scale.setScalar(0.72); mesh.position.y = 0.75; object.add(mesh);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.65, 0.045, 6, 24), new THREE.MeshBasicMaterial({ color: data.color }));
       ring.rotation.x = Math.PI / 2; ring.position.y = 0.12; object.add(ring);
-      const tag = this.game.world.label?.(object, data.label, data.color, 2.1);
-      if (tag) { tag.scale.set(3.6, 0.68, 1); tag.visible = false; }
+      const tag = this.game.world.label?.(object, data.label, data.color, 1.6);
+      if (tag) { tag.scale.set(3.2, 0.60, 1); tag.visible = false; }
       this.game.world.mission.add(object);
       item = { type, object, mesh, tag, active: true }; this.pickups.push(item);
     }
@@ -111,7 +114,7 @@ export class Combat {
       // One nearby caption identifies loot without hiding the fighting behind it.
       if (item.tag) item.tag.visible = item === nearbyLoot;
       item.mesh.rotation.y += dt * 1.5;
-      item.mesh.position.y = 1 + Math.sin(this.game.elapsed * 3 + item.x) * 0.12;
+      item.mesh.position.y = 0.75 + Math.sin(this.game.elapsed * 3 + item.x) * 0.09;
       if (distance(item, this.game.player) < 1.45) this.collect(item);
     }
     for (const enemy of this.game.entities) {
@@ -152,7 +155,7 @@ export class Combat {
 
   makeBolt(points, color) {
     if (this.bullets.length >= 28) return;
-    const geometry = new THREE.BufferGeometry().setFromPoints(points.map(p => new THREE.Vector3(p.x, p.variant === "drone" ? 2.4 : 1.4, p.z)));
+    const geometry = new THREE.BufferGeometry().setFromPoints(points.map(p => new THREE.Vector3(p.x, p.object ? (p === this.game.player ? actorHeight(p.object, 1.18) : aimHeight(p)) : p.y ?? 1.4, p.z)));
     const object = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color }));
     this.game.world.mission.add(object);
     this.bullets.push({ object, life: 0.16, beam: true });
@@ -160,13 +163,14 @@ export class Combat {
 
   makeBullet(target, weapon) {
     if (this.bullets.length >= 28) return;
-    const object = this.bulletPool.pop() || new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), new THREE.MeshBasicMaterial({ color: weapon.color }));
-    object.position.set(this.game.player.x, 1.65, this.game.player.z);
+    const object = this.bulletPool.pop() || new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), new THREE.MeshBasicMaterial({ color: weapon.color }));
+    const muzzleY = actorHeight(this.game.player.object, 1.18);
+    object.position.set(this.game.player.x, muzzleY, this.game.player.z);
     object.visible = true; this.game.world.mission.add(object);
     const dx = target.x - this.game.player.x, dz = target.z - this.game.player.z;
     const d = Math.hypot(dx, dz) || 1;
-    const height = target.variant === "drone" ? target.object.position.y + 0.4 : 1.65;
-    this.bullets.push({ object, x: this.game.player.x, z: this.game.player.z, y: 1.65, vy: (height - 1.65) / Math.max(0.1, d / 22), vx: dx / d * 22, vz: dz / d * 22, life: 0.7, damage: weapon.damage });
+    const height = aimHeight(target);
+    this.bullets.push({ object, x: this.game.player.x, z: this.game.player.z, y: muzzleY, vy: (height - muzzleY) / Math.max(0.1, d / 22), vx: dx / d * 22, vz: dz / d * 22, life: 0.7, damage: weapon.damage });
   }
 
   updateBullets(dt) {

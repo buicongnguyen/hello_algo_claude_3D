@@ -61,8 +61,8 @@ export class Expedition {
     const item = this.actor(data.model, position, data.slot === "software" ? 0.9 : 0.48);
     Object.assign(item, { id, active: true, missionDisc });
     item.marker = this.game.world.createMarker(position, data.color, 1);
-    item.tag = this.game.world.label?.(item.marker, data.name.toUpperCase(), data.color, 2.4);
-    if (item.tag) { item.tag.scale.set(3.5, 0.66, 1); item.tag.visible = false; }
+    item.tag = this.game.world.label?.(item.marker, data.name.toUpperCase(), data.color, 2.0);
+    if (item.tag) { item.tag.scale.set(3.1, 0.59, 1); item.tag.visible = false; }
     this.discoveries.push(item);
   }
 

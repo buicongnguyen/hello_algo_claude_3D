@@ -59,7 +59,7 @@ export function dressRobot(world, actor, equipment) {
   for (const slot of ["body", "back", "head"]) {
     const data = EQUIPMENT[equipment.equipped[slot]];
     if (!data) continue;
-    const part = world.createActor(data.model, { x: 0, z: 0 }, 1, actor);
+    const part = world.createActor(data.model, { x: 0, z: 0 }, 1, actor, { nativeScale: true });
     part.position.set(0, 0, 0);
     part.userData.equipmentSlot = slot;
     actor.userData.attachments.push(part);

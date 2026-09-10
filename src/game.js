@@ -3,6 +3,7 @@ import { applyHit, earnedUpgrades, recordResult, sequenceStep } from "./rules.js
 import { Combat } from "./combat.js";
 import { Expedition } from "./expeditions.js";
 import { dressRobot, equipmentStats } from "./equipment.js";
+import { actorHeight } from "./presentation.js";
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -324,7 +325,7 @@ export class Game {
     if (this.carry) {
       this.carry.x = this.player.x;
       this.carry.z = this.player.z;
-      this.carry.object.position.set(this.player.x, 3.1, this.player.z);
+      this.carry.object.position.set(this.player.x, actorHeight(this.player.object, 3.25), this.player.z);
       this.carry.object.rotation.y += dt * 2;
     }
   }

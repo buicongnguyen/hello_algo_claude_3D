@@ -43,6 +43,7 @@ The minimap is oriented like your movement controls. White arrow = KAI, red circ
 
 See [COMBAT_UPDATE.md](./COMBAT_UPDATE.md) for the combat design, balance rules, resource limits and verification.
 See [EXPEDITIONS_PLAN.md](./EXPEDITIONS_PLAN.md) for the new scenarios, equipment rules, Blender asset plan and logic review.
+See [VISUAL_CLARITY.md](./VISUAL_CLARITY.md) for compact model proportions, wider mobile framing, detailed Blender models and rendering safeguards.
 
 ## Development
 

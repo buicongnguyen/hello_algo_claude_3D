@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { dressRobot } from "./equipment.js";
+import { actorScale, cameraZoom, CAMERA_YAW } from "./presentation.js";
 
 const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm", "octopus", "starfish", "snail", "clam", "coral_cluster", "reef_arch", "salvage_tower", "moon_mushroom", "software_disc", "prism_armor", "twin_thrusters", "halo_antenna"];
 
@@ -25,7 +26,7 @@ export class World {
     this.effects = [];
     this.effectPool = [];
     this.markers = [];
-    this.cameraYaw = Math.atan2(9.5, 15);
+    this.cameraYaw = CAMERA_YAW;
     this.desiredCamera = new THREE.Vector3();
     this.desiredTarget = new THREE.Vector3();
     this.shared = new THREE.Group();
@@ -69,6 +70,8 @@ export class World {
     this.sun.position.set(-12, 25, 10);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.normalBias = 0.035;
+    this.sun.shadow.bias = -0.00015;
     this.sun.shadow.camera.left = -28;
     this.sun.shadow.camera.right = 28;
     this.sun.shadow.camera.top = 28;
@@ -175,13 +178,13 @@ export class World {
       palm.rotation.y = i;
     });
     this.bolt = this.createActor("bolt", { x: -3, z: -4 }, 0.95, this.landmarks);
-    this.obstacles = [{ x: 15, z: -9, radius: 1.3 }, { x: -14, z: -9, radius: 0.9 }, ...[[-16, -3], [-15, 5], [16, 5], [11, 13], [-8, 15]].map(([x, z]) => ({ x, z, radius: 0.3 }))];
+    this.obstacles = [{ x: 15, z: -9, radius: 1.1 }, { x: -14, z: -9, radius: 0.77 }, ...[[-16, -3], [-15, 5], [16, 5], [11, 13], [-8, 15]].map(([x, z]) => ({ x, z, radius: 0.25 }))];
     this.defaultObstacles = [...this.obstacles];
     this.mapLandmarks = this.defaultObstacles;
 
     const beamMat = new THREE.MeshBasicMaterial({ color: 0x8ef5ff, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide });
     this.beamPivot = new THREE.Group();
-    this.beamPivot.position.set(15, 6.0, -9);
+    this.beamPivot.position.set(15, 0.55 + 6.72 * light.scale.y, -9);
     const beam = new THREE.Mesh(new THREE.ConeGeometry(2.8, 20, 18, 1, true), beamMat);
     beam.rotation.x = -Math.PI / 2;
     beam.position.z = -10;
@@ -212,7 +215,7 @@ export class World {
       const p = { x: Math.cos(angle) * 17.2, z: Math.sin(angle) * 17.2 };
       const object = this.createActor(model, p, 0.95 + i % 2 * 0.2);
       object.rotation.y = -angle;
-      this.obstacles.push({ ...p, radius: 0.65 }); this.mapLandmarks.push(p);
+      this.obstacles.push({ ...p, radius: 0.52 }); this.mapLandmarks.push(p);
     }
     for (const [x, z, radius] of [[-10, -1, 2.5], [7, -10, 2.5], [9, 9, 1.7]]) {
       const pool = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), new THREE.MeshStandardMaterial({ color: theme === "scrapyard" ? 0x705bc6 : 0x399cae, emissive: theme === "moonpool" ? 0x164f76 : 0x000000, roughness: 0.3 }));
@@ -222,7 +225,7 @@ export class World {
 
   showRobotPreview(equipment) {
     this.clearMission();
-    this.previewActor = this.createActor("kai", { x: 0, z: 0 }, 1.2);
+    this.previewActor = this.createActor("kai", { x: 0, z: 0 }, 1.2, this.mission, { nativeScale: true });
     dressRobot(this, this.previewActor, equipment);
     this.previewActor.rotation.y = this.previewAngle ?? 0.4;
   }
@@ -247,11 +250,11 @@ export class World {
     return group;
   }
 
-  createActor(name, position, scale = 1, parent = this.mission) {
+  createActor(name, position, scale = 1, parent = this.mission, { nativeScale = false } = {}) {
     const source = this.models.get(name) || this.fallback(name);
     const object = source.clone(true);
-    object.position.set(position.x, position.y || 0.55, position.z);
-    object.scale.setScalar(scale);
+    object.position.set(position.x, position.y ?? 0.55, position.z);
+    object.scale.setScalar(actorScale(name, scale, nativeScale));
     object.traverse(child => {
       if (child.isMesh) {
         child.castShadow = this.settings.quality !== "low";
@@ -300,7 +303,7 @@ export class World {
     map.colorSpace = THREE.SRGBColorSpace;
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map, depthTest: false }));
     sprite.position.y = height;
-    sprite.scale.set(compact ? 1.3 : 5.5, compact ? 0.98 : 1.04, 1);
+    sprite.scale.set(compact ? 1.05 : 4.4, compact ? 0.79 : 0.83, 1);
     sprite.renderOrder = 5;
     parent.add(sprite);
     return sprite;
@@ -308,12 +311,13 @@ export class World {
 
   createMarker(position, color = 0xffd166, radius = 1.2) {
     const group = new THREE.Group();
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.15, 10, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.98 }));
+    // Keep the objective footprint, but remove the heavy ring and tall light wall.
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.065, 6, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.98 }));
     ring.rotation.x = Math.PI / 2;
     ring.position.y = 0.62;
     group.add(ring);
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.05, radius * 0.48, 5.2, 16, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.21, depthWrite: false }));
-    beam.position.y = 2.9;
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.035, radius * 0.24, 2.3, 12, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.12, depthWrite: false }));
+    beam.position.y = 1.78;
     group.add(beam);
     group.position.set(position.x, position.y || 0, position.z);
     group.userData.ring = ring;
@@ -434,7 +438,8 @@ export class World {
       this.cameraTarget.lerp(innerWidth < 620 ? this.desiredTarget.set(0, 0.65, 0) : this.desiredTarget.set(-1.2, 1.8, 0.7), 1 - Math.exp(-dt * 7));
       this.camera.lookAt(this.cameraTarget);
     } else if (focus) {
-      const desired = this.desiredCamera.set(focus.x + 9.5, 10.8, focus.z + 13.5);
+      const zoom = cameraZoom(this.camera.aspect);
+      const desired = this.desiredCamera.set(focus.x + 9.5 * zoom, 0.8 + 10 * zoom, focus.z - 1.5 + 15 * zoom);
       const target = this.desiredTarget.set(focus.x, 0.8, focus.z - 1.5);
       if (this.launchTime != null) { target.y += Math.min(9, this.rocket.position.y * 0.7); desired.y += Math.min(6, this.rocket.position.y * 0.4); }
       const damping = reducedMotion ? 1 : 1 - Math.exp(-dt * 4.5);

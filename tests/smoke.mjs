@@ -58,6 +58,8 @@ try {
     return { loaded: api.world.models.size, actualBlender: Boolean(api.world.models.get("kai").getObjectByName("KAI_Robot")), limbs: api.game.player.object.userData.limbs.length };
   });
   if (assets.loaded !== 24 || !assets.actualBlender || assets.limbs !== 4) throw new Error(`Blender asset/pivot regression: ${JSON.stringify(assets)}`);
+  const modelScale = await page.evaluate(() => window.__ROBOT_BEACH__.game.player.object.scale.y);
+  if (Math.abs(modelScale - 0.94 * 0.82) > 0.001) throw new Error(`Gameplay KAI is not using compact proportions: ${modelScale}`);
 
   const missionSetup = await page.evaluate(async () => {
     const api = window.__ROBOT_BEACH__;
@@ -188,6 +190,18 @@ try {
     return { overflow: document.documentElement.scrollWidth > innerWidth, overlap: map.bottom > controls.top && map.right > controls.left, counterOverlap: counter.bottom > gear.top };
   });
   if (layout.overflow || layout.overlap || layout.counterOverlap) throw new Error(`Mobile HUD overlap: ${JSON.stringify(layout)}`);
+  const portraitFraming = await mobile.evaluate(() => {
+    const { game, world } = window.__ROBOT_BEACH__;
+    world.update(0, game.player, true);
+    const actor = game.player.object;
+    const base = actor.localToWorld(actor.position.clone().set(0, 0, 0)).project(world.camera);
+    const head = actor.localToWorld(actor.position.clone().set(0, 2.95, 0)).project(world.camera);
+    return { height: Math.abs(head.y - base.y) * world.canvas.clientHeight / 2,
+      zoom: (world.camera.position.x - game.player.x) / 9.5,
+      yaw: Math.atan2(world.camera.position.x - world.cameraTarget.x, world.camera.position.z - world.cameraTarget.z) };
+  });
+  if (portraitFraming.height < 45 || portraitFraming.height > 95 || portraitFraming.zoom < 1.45 || Math.abs(portraitFraming.yaw - Math.atan2(9.5, 15)) > 0.001) throw new Error(`Portrait framing regression: ${JSON.stringify(portraitFraming)}`);
+  console.log(`Portrait framing: ${JSON.stringify(portraitFraming)}`);
   await mobile.close();
 
   await page.evaluate(() => { const api = window.__ROBOT_BEACH__; api.game.stop(); api.ui.showTitle(); });
@@ -202,6 +216,7 @@ try {
   });
   await page.waitForFunction(() => window.__ROBOT_BEACH__.game.progress.equipment.equipped.body === "armor");
   if (!await page.evaluate(() => window.__ROBOT_BEACH__.game.player.object.userData.attachments.some(p => p.getObjectByName("Prism_Armor")))) throw new Error("Blender armor not attached to KAI");
+  if (!await page.evaluate(() => window.__ROBOT_BEACH__.game.player.object.userData.attachments.every(p => p.scale.y === 1 && p.position.y === 0))) throw new Error("Equipment was scaled twice or offset from KAI");
   await page.evaluate(() => { const api = window.__ROBOT_BEACH__; api.game.stop(); api.ui.showWorkshop(); });
   await page.getByRole("button", { name: "Candy pink", exact: true }).click();
   const paintState = await page.evaluate(() => {
