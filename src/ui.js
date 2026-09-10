@@ -1,5 +1,5 @@
 import { CHAPTERS, TOTAL_STAGES } from "./missions.js";
-import { isUnlocked, stageKey } from "./rules.js";
+import { earnedUpgrades, isUnlocked, stageKey } from "./rules.js";
 
 export class UI {
   constructor(progress, callbacks) {
@@ -10,12 +10,16 @@ export class UI {
     this.touch = document.querySelector("#touchControls");
     this.cache = {};
     this.messageTimer = 0;
+    this.pulseMeter = document.querySelector("#pulseMeter");
+    this.dashMeter = document.querySelector("#dashMeter");
+    this.touchMeters = { pulse: document.querySelector('[data-touch="pulse"]'), dash: document.querySelector('[data-touch="dash"]') };
     this.bind();
   }
 
   bind() {
     document.querySelector("#continueButton").addEventListener("click", () => this.callbacks.continue());
     document.querySelector("#missionsButton").addEventListener("click", () => this.showMap());
+    document.querySelector("#roamButton").addEventListener("click", () => this.callbacks.roam());
     document.querySelectorAll("[data-screen='title']").forEach(button => button.addEventListener("click", () => this.showTitle()));
     document.querySelectorAll("[data-screen='map']").forEach(button => button.addEventListener("click", () => this.showMap()));
     document.querySelector("#launchButton").addEventListener("click", () => this.callbacks.launch(this.selected));
@@ -27,6 +31,8 @@ export class UI {
     document.querySelector("#quality").addEventListener("change", event => this.callbacks.settings({ quality: event.target.value }));
     document.querySelector("#reducedMotion").checked = this.progress.settings.reducedMotion;
     document.querySelector("#reducedMotion").addEventListener("change", event => this.callbacks.settings({ reducedMotion: event.target.checked }));
+    document.querySelector("#soundEnabled").checked = this.progress.settings.sound !== false;
+    document.querySelector("#soundEnabled").addEventListener("change", event => this.callbacks.settings({ sound: event.target.checked }));
     document.querySelector("#skipDialogue").addEventListener("click", () => this.hideDialogue());
   }
 
@@ -41,6 +47,7 @@ export class UI {
   }
 
   showOnly(id) {
+    this.hideDialogue();
     this.screens.forEach(screen => document.querySelector(`#${screen}`).classList.toggle("hidden", screen !== id));
     this.hud.classList.add("hidden");
     this.touch.classList.add("hidden");
@@ -57,6 +64,7 @@ export class UI {
     document.querySelector("#campaignCount").textContent = `${complete} / ${TOTAL_STAGES}`;
     document.querySelector("#campaignBar").style.width = `${(complete / TOTAL_STAGES) * 100}%`;
     document.querySelector("#continueButton").textContent = complete ? "Continue journey" : "Begin journey";
+    document.querySelector("#roamButton").classList.toggle("hidden", !earnedUpgrades(this.progress).freeRoam);
   }
 
   showMap() {
@@ -104,12 +112,28 @@ export class UI {
   }
 
   updateHUD(state) {
-    this.write("hudTime", Math.max(0, Math.ceil(state.time)));
+    this.write("hudTime", state.untimed ? "—" : Math.max(0, Math.ceil(state.time)));
     this.write("hudProgress", state.progressText);
     this.write("hudProgressIcon", state.progressIcon || "⚡");
-    this.write("hudShield", `${"◆".repeat(state.shields)}${"◇".repeat(Math.max(0, 3 - state.shields))}`);
-    document.querySelector("#pulseMeter").style.setProperty("--ready", `${state.pulseReady * 100}%`);
-    document.querySelector("#dashMeter").style.setProperty("--ready", `${state.dashReady * 100}%`);
+    this.write("hudShield", `${"◆".repeat(state.shields)}${"◇".repeat(Math.max(0, state.maxShields - state.shields))}`);
+    for (const [id, element, value] of [["pulse", this.pulseMeter, state.pulseReady], ["dash", this.dashMeter, state.dashReady]]) {
+      const rounded = Math.round(value * 100);
+      if (this.cache[id] !== rounded) { element.style.setProperty("--ready", `${rounded}%`); this.touchMeters[id].style.setProperty("--ready", `${rounded}%`); this.cache[id] = rounded; }
+    }
+  }
+
+  navigation(target, player, yaw) {
+    const nav = document.querySelector("#navigation");
+    nav.classList.toggle("hidden", !target);
+    if (!target) return;
+    const dx = target.x - player.x;
+    const dz = target.z - player.z;
+    const right = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+    const forward = -dx * Math.sin(yaw) - dz * Math.cos(yaw);
+    const angle = Math.round(Math.atan2(right, forward) * 180 / Math.PI);
+    if (this.cache.navAngle !== angle) { document.querySelector("#navArrow").style.transform = `rotate(${angle}deg)`; this.cache.navAngle = angle; }
+    this.write("navLabel", target.label);
+    this.write("navDistance", `${Math.round(Math.hypot(dx, dz))} m`);
   }
 
   write(id, value) {
@@ -120,11 +144,18 @@ export class UI {
 
   prompt(text) {
     const element = document.querySelector("#prompt");
-    element.textContent = text || "";
-    element.classList.toggle("hidden", !text);
+    if (this.cache.prompt !== text) {
+      const touch = matchMedia("(pointer: coarse)").matches;
+      element.textContent = touch ? (text || "").replace(/^E · /, "USE · ") : text || "";
+      element.classList.toggle("hidden", !text);
+      this.cache.prompt = text;
+    }
   }
 
   message(text, bad = false) {
+    if (this.lastMessage === text && performance.now() - this.lastMessageTime < 1600) return;
+    this.lastMessage = text; this.lastMessageTime = performance.now();
+    this.callbacks.sound?.(bad ? "warning" : "note");
     const element = document.querySelector("#message");
     clearTimeout(this.messageTimer);
     element.textContent = text;
@@ -161,6 +192,7 @@ export class UI {
   }
 
   modal({ icon, eyebrow, title, text, stats = [], actions = [] }) {
+    this.hideDialogue();
     const modal = document.querySelector("#modal");
     document.querySelector("#modalIcon").textContent = icon;
     document.querySelector("#modalEyebrow").textContent = eyebrow;

@@ -1,5 +1,7 @@
 # Robot Beach 3D: Signalbreak — Production Plan
 
+Status: the first playable release is implemented. The sections below describe the intended direction; the implementation audit at the end identifies the actual shipped scope. See [DESIGN_REVIEW.md](./DESIGN_REVIEW.md) for the second evaluation of the original 2D game and the larger production-quality roadmap requested after the first build.
+
 ## 1. Product vision
 
 Build a standalone 3D successor to **Robot Beach Adventures** using Blender-authored assets and Three.js. The new game keeps the original world—friendly robots, sea creatures, lighthouse, rocket, beach and playful machinery—but changes the experience from separate flat minigames into one connected action-adventure campaign.
@@ -295,3 +297,16 @@ Runtime owns one active mission. Loading a mission disposes mission-specific mes
 - Tests and production build pass.
 - The repository is public, pushed over SSH and the GitHub Pages URL serves the tested build.
 
+## 11. Implementation audit and reviewed release scope
+
+The release ships one shared 3D island and a menu-based mission map, not in-world mission portals. It has ten Blender-exported GLBs and editable Blender source. KAI and scout limbs use pivot-based walk animation. Repeated shoreline stones are instanced; animated actors remain scene objects. Pulse effects use a bounded reusable pool. Unique geometry, materials and label textures are disposed between missions while cached GLB resources are preserved.
+
+All 15 mission objective paths have automated completion checks. The last rescue beacon, patrol/collection counters, relay failure, boss shielding, expiration ordering, earned upgrades, camera-relative movement and disposal behavior have regression coverage. These tests exercise rules and state transitions; they do not replace human balancing or a complete physical-device performance matrix.
+
+The camera is an elevated damped follow camera. A compass names the current target and verb; signal nodes and race gates have floating labels. The pulse ring is a transient effect, not a permanent range preview. The game uses radial range tests rather than raycast aiming. Physical interactions use distance checks and simple obstacle circles rather than a physics engine.
+
+Defense preparation is untimed. After every turret is placed, the player explicitly starts the wave. Turrets have consistent range/damage; the later wave uses tougher scouts. The Warden has a telegraphed charge, a cyan exposed-core window and limited reinforcement calls, rather than the full beam/summon phase set originally proposed.
+
+The tide ring visualizes remaining mission time. Red moving surge rings damage KAI; individual creatures are not simulated drowning. Rescue means carrying one creature to a marked safe destination. BOLT accompanies KAI once its dock has been repaired. Chapter completion awards a larger pulse, a fourth shield, stronger pulse damage and a longer dash. These upgrades persist on replays. The ending animates the rocket launch, strengthens the lighthouse beam and unlocks untimed free roam.
+
+Deferred production work is explicitly tracked in DESIGN_REVIEW.md: separate chapter environments, deeper beam-routing puzzles, companion commands, authored cutscenes, richer enemy tactics, polished rigs and animation, music, gamepad/remapping, terrain navigation, adaptive frame-time profiling and broad device playtesting. "Auto" quality currently chooses a resolution/shadow profile from viewport width; it does not continuously benchmark the GPU.

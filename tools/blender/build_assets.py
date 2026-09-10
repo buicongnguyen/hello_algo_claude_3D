@@ -25,7 +25,7 @@ def material(name, color, metallic=0.0, roughness=0.55, emission=None):
     bsdf.inputs["Roughness"].default_value = roughness
     if emission:
         bsdf.inputs["Emission Color"].default_value = (*emission, 1)
-        bsdf.inputs["Emission Strength"].default_value = 3.5
+        bsdf.inputs["Emission Strength"].default_value = 1.2
     return mat
 
 
@@ -105,11 +105,18 @@ def robot(name="KAI_Robot", hostile=False):
     sphere("Head", (0, 0, 2.15), (0.48, 0.42, 0.42), shell, r)
     cube("Visor", (0, -0.40, 2.14), (0.31, 0.055, 0.10), light, 0.06, r)
     for side in (-1, 1):
+        suffix = "L" if side == -1 else "R"
         sphere(f"Shoulder_{side}", (side * 0.62, 0, 1.66), (0.16, 0.16, 0.16), NAVY, r)
-        cylinder(f"Arm_{side}", (side * 0.72, 0, 1.25), 0.12, 0.72, shell, r)
-        sphere(f"Hand_{side}", (side * 0.72, 0, 0.84), (0.16, 0.16, 0.16), light, r)
-        cylinder(f"Leg_{side}", (side * 0.24, 0, 0.48), 0.15, 0.72, NAVY, r)
-        cube(f"Foot_{side}", (side * 0.24, -0.10, 0.10), (0.23, 0.34, 0.10), shell, 0.08, r)
+        arm = root(f"ShoulderPivot_{suffix}")
+        arm.parent = r
+        arm.location = (side * 0.62, 0, 1.66)
+        cylinder(f"Arm_{side}", (side * 0.10, 0, -0.41), 0.12, 0.72, shell, arm)
+        sphere(f"Hand_{side}", (side * 0.10, 0, -0.82), (0.16, 0.16, 0.16), light, arm)
+        hip = root(f"Hip_{suffix}")
+        hip.parent = r
+        hip.location = (side * 0.24, 0, 0.84)
+        cylinder(f"Leg_{side}", (0, 0, -0.36), 0.15, 0.72, NAVY, hip)
+        cube(f"Foot_{side}", (0, -0.10, -0.74), (0.23, 0.34, 0.10), shell, 0.08, hip)
     cylinder("Antenna", (0, 0, 2.65), 0.035, 0.32, NAVY, r)
     sphere("AntennaLight", (0, 0, 2.84), (0.09, 0.09, 0.09), light, r)
     return r

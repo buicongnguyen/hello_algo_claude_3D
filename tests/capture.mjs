@@ -42,6 +42,14 @@ try {
   await mobile.getByRole("button", { name: "Enter mission" }).click();
   await mobile.waitForTimeout(500);
   await mobile.screenshot({ path: join(OUT, "04-compact-mission.png") });
+  await mobile.setViewportSize({ width: 390, height: 844 });
+  await mobile.screenshot({ path: join(OUT, "05-portrait-mission.png") });
+  await page.evaluate(() => {
+    const api = window.__ROBOT_BEACH__;
+    api.game.begin(api.catalog.find(item => item.stage.id === "core"));
+  });
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: join(OUT, "06-circuit.png") });
   console.log(`Visual captures written to ${OUT}`);
 } finally {
   if (browser) await browser.close();

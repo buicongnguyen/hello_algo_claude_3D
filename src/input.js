@@ -3,15 +3,15 @@ export class InputController {
     this.keys = new Set();
     this.actions = new Set();
     this.touch = { x: 0, y: 0 };
-    this.enabled = true;
+    this.enabled = false;
     this.bindKeyboard();
     this.bindTouch();
   }
 
   bindKeyboard() {
     window.addEventListener("keydown", event => {
-      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(event.code)) event.preventDefault();
       if (!this.enabled) return;
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Enter"].includes(event.code)) event.preventDefault();
       this.keys.add(event.code);
       if (!event.repeat) {
         if (["KeyQ", "Space"].includes(event.code)) this.actions.add("pulse");
@@ -21,15 +21,17 @@ export class InputController {
       }
     });
     window.addEventListener("keyup", event => this.keys.delete(event.code));
-    window.addEventListener("blur", () => { this.keys.clear(); this.touch.x = 0; this.touch.y = 0; });
+    window.addEventListener("blur", () => this.clear());
   }
 
   bindTouch() {
     const joystick = document.querySelector("#joystick");
     const knob = joystick?.querySelector("i");
-    let pointerId = null;
+    this.joystick = joystick;
+    this.knob = knob;
+    this.pointerId = null;
     const update = event => {
-      if (pointerId !== event.pointerId) return;
+      if (!this.enabled || this.pointerId !== event.pointerId) return;
       const rect = joystick.getBoundingClientRect();
       const dx = event.clientX - (rect.left + rect.width / 2);
       const dy = event.clientY - (rect.top + rect.height / 2);
@@ -39,11 +41,11 @@ export class InputController {
       this.touch.y = (dy / length) * (radius / 42);
       knob.style.transform = `translate(${this.touch.x * 34}px, ${this.touch.y * 34}px)`;
     };
-    joystick?.addEventListener("pointerdown", event => { pointerId = event.pointerId; joystick.setPointerCapture(pointerId); update(event); });
+    joystick?.addEventListener("pointerdown", event => { if (!this.enabled) return; this.pointerId = event.pointerId; joystick.setPointerCapture(this.pointerId); update(event); });
     joystick?.addEventListener("pointermove", update);
     const release = event => {
-      if (pointerId !== event.pointerId) return;
-      pointerId = null; this.touch.x = 0; this.touch.y = 0;
+      if (this.pointerId !== event.pointerId) return;
+      this.pointerId = null; this.touch.x = 0; this.touch.y = 0;
       knob.style.transform = "translate(0, 0)";
     };
     joystick?.addEventListener("pointerup", release);
@@ -74,5 +76,9 @@ export class InputController {
   clear() {
     this.actions.clear();
     this.keys.clear();
+    this.touch.x = 0; this.touch.y = 0;
+    if (this.pointerId != null && this.joystick?.hasPointerCapture(this.pointerId)) this.joystick.releasePointerCapture(this.pointerId);
+    this.pointerId = null;
+    if (this.knob) this.knob.style.transform = "translate(0, 0)";
   }
 }

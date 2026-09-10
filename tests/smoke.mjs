@@ -5,16 +5,18 @@ import { chromium } from "playwright-core";
 
 const ROOT = process.cwd();
 const PORT = 49431;
+const URL = process.env.GAME_URL || `http://127.0.0.1:${PORT}/`;
 const paths = [
   join(process.env["ProgramFiles(x86)"] || "", "Microsoft", "Edge", "Application", "msedge.exe"),
   join(process.env.ProgramFiles || "", "Microsoft", "Edge", "Application", "msedge.exe"),
   join(process.env.ProgramFiles || "", "Google", "Chrome", "Application", "chrome.exe"),
+  "/usr/bin/google-chrome", "/usr/bin/chromium",
 ];
 const executablePath = paths.find(path => path && existsSync(path));
 if (!executablePath) throw new Error("Edge or Chrome is required for the smoke test");
 
-const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(PORT)], { cwd: ROOT, stdio: ["ignore", "pipe", "inherit"] });
-await new Promise((resolve, reject) => {
+const server = process.env.GAME_URL ? null : spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(PORT), "--strictPort"], { cwd: ROOT, stdio: ["ignore", "pipe", "inherit"] });
+if (server) await new Promise((resolve, reject) => {
   const timeout = setTimeout(() => reject(new Error("Vite did not start")), 12_000);
   server.stdout.on("data", chunk => {
     if (String(chunk).includes(`http://127.0.0.1:${PORT}`)) { clearTimeout(timeout); resolve(); }
@@ -28,7 +30,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
+  await page.goto(URL, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: /Signalbreak/i }).waitFor({ state: "visible", timeout: 20_000 });
   await page.getByRole("button", { name: "Mission map" }).click();
   if (await page.locator(".chapter-card").count() !== 5) throw new Error("Expected five chapter cards");
@@ -51,6 +53,12 @@ try {
   await page.getByRole("heading", { name: "Wake the Beach" }).waitFor({ state: "visible" });
   await page.getByRole("button", { name: "Resume" }).click();
 
+  const assets = await page.evaluate(() => {
+    const api = window.__ROBOT_BEACH__;
+    return { loaded: api.world.models.size, actualBlender: Boolean(api.world.models.get("kai").getObjectByName("KAI_Robot")), limbs: api.game.player.object.userData.limbs.length };
+  });
+  if (assets.loaded !== 10 || !assets.actualBlender || assets.limbs !== 4) throw new Error(`Blender asset/pivot regression: ${JSON.stringify(assets)}`);
+
   const missionSetup = await page.evaluate(async () => {
     const api = window.__ROBOT_BEACH__;
     const results = [];
@@ -64,18 +72,41 @@ try {
   });
   if (missionSetup.length !== 15 || missionSetup.some(item => !item.running)) throw new Error("One or more campaign missions failed to initialize");
 
+  const resources = await page.evaluate(() => {
+    const { world, game, catalog } = window.__ROBOT_BEACH__;
+    const cycle = () => {
+      for (const item of catalog) {
+        game.begin(item);
+        for (let i = 0; i < 40; i++) world.pulse(game.player, 3);
+        world.update(0.02, game.player);
+        game.stop();
+        world.update(0.02, null);
+      }
+      return { ...world.renderer.info.memory, effects: world.effectPool.length, drawCalls: world.renderer.info.render.calls };
+    };
+    const before = cycle();
+    const after = cycle();
+    return { before, after };
+  });
+  if (resources.after.geometries > resources.before.geometries + 1 || resources.after.textures > resources.before.textures + 1 || resources.after.effects > 24) throw new Error(`Restart resource growth: ${JSON.stringify(resources)}`);
+  console.log(`Restart resource check: ${JSON.stringify(resources)}`);
+
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-  await mobile.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
+  await mobile.goto(URL, { waitUntil: "networkidle" });
   await mobile.getByRole("heading", { name: /Signalbreak/i }).waitFor({ state: "visible", timeout: 20_000 });
   const overflow = await mobile.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
   if (overflow) throw new Error("Mobile title has horizontal overflow");
   await mobile.getByRole("button", { name: "Mission map" }).click();
   if (!await mobile.locator(".chapter-card").first().isVisible()) throw new Error("Mobile mission map is not visible");
+  await mobile.locator(".stage-dots button").first().click();
+  await mobile.getByRole("button", { name: "Enter mission" }).click();
+  await mobile.locator("#navigation:not(.hidden)").waitFor();
+  if (!await mobile.locator("#hudShield").isVisible() || !await mobile.locator("#touchControls").isVisible()) throw new Error("Mobile shield or touch controls are hidden");
   await mobile.close();
 
   if (errors.length) throw new Error(`Browser errors:\n${errors.join("\n")}`);
   console.log("Smoke test passed: 3D boot, campaign map, mission launch, movement, pulse, pause and mobile layout.");
 } finally {
   if (browser) await browser.close();
-  server.kill("SIGTERM");
+  server?.kill("SIGTERM");
 }

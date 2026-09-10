@@ -7,11 +7,24 @@ export function stageKey(chapterId, stageId) {
 }
 
 export function createProgress(raw = {}) {
+  if (!raw || typeof raw !== "object") raw = {};
   return {
     version: SAVE_VERSION,
     completed: Array.isArray(raw.completed) ? [...new Set(raw.completed.filter(value => typeof value === "string"))] : [],
     results: raw.results && typeof raw.results === "object" ? { ...raw.results } : {},
     settings: { quality: "auto", reducedMotion: false, ...(raw.settings || {}) },
+  };
+}
+
+export function earnedUpgrades(progress) {
+  const earned = chapter => progress.completed.includes(stageKey(chapter.id, chapter.stages.at(-1).id));
+  return {
+    pulseRadius: earned(CHAPTERS[0]) ? 4.1 : 3.45,
+    maxShields: earned(CHAPTERS[1]) ? 4 : 3,
+    pulseDamage: earned(CHAPTERS[2]) ? 2 : 1,
+    dashDuration: earned(CHAPTERS[3]) ? 0.55 : 0.36,
+    dashRecharge: earned(CHAPTERS[3]) ? 1.8 : 2.5,
+    freeRoam: earned(CHAPTERS[4]),
   };
 }
 

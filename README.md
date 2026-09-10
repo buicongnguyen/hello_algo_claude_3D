@@ -2,6 +2,10 @@
 
 A standalone Blender + Three.js successor to Robot Beach Adventures. Explore one connected low-poly island as KAI, recover five Aurora fragments, rescue beach friends, build defenses, race the skyway and relight the lighthouse.
 
+[Play Signalbreak](https://buicongnguyen.github.io/hello_algo_claude_3D/) · [Design reassessment and production roadmap](./DESIGN_REVIEW.md)
+
+This is a playable browser-game foundation, with a documented roadmap toward a much higher production standard. It is not a finished AAA-scale game.
+
 ## Features
 
 - Five story chapters and fifteen missions.
@@ -10,6 +14,8 @@ A standalone Blender + Three.js successor to Robot Beach Adventures. Explore one
 - Persistent campaign progress, medals and chapter upgrades.
 - Keyboard and touch controls, reduced motion and adaptive quality.
 - Responsive UI designed for desktop and mobile.
+- Camera-relative movement, target compass, numbered world labels and persistent chapter upgrades on replay.
+- BOLT companion following, a visible rocket-launch ending and unlocked free roam.
 
 ## Controls
 
@@ -23,14 +29,14 @@ A standalone Blender + Three.js successor to Robot Beach Adventures. Explore one
 
 ```powershell
 npm install
-npm run assets:blender
 npm run dev
 ```
 
-The Blender asset generator expects the local Blender 4.5.3 LTS executable recorded in `package.json`. To use another Blender installation, run it directly:
+The exported models are already included; Blender is only needed to regenerate assets. Use Blender 4.5 LTS on your PATH or set `BLENDER_BIN`:
 
 ```powershell
-& "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe" --background --python tools/blender/build_assets.py
+$env:BLENDER_BIN = "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
+npm run assets:blender
 ```
 
 ## Verification

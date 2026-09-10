@@ -5,43 +5,43 @@
     {
       "name": "kai",
       "file": "kai.glb",
-      "bytes": 110708,
+      "bytes": 111068,
       "meshFaces": 600
     },
     {
       "name": "bolt",
       "file": "bolt.glb",
-      "bytes": 44424,
+      "bytes": 44440,
       "meshFaces": 108
     },
     {
       "name": "rust_scout",
       "file": "rust_scout.glb",
-      "bytes": 110756,
+      "bytes": 111128,
       "meshFaces": 600
     },
     {
       "name": "lighthouse",
       "file": "lighthouse.glb",
-      "bytes": 48284,
+      "bytes": 48300,
       "meshFaces": 262
     },
     {
       "name": "energy_cell",
       "file": "energy_cell.glb",
-      "bytes": 26740,
+      "bytes": 26772,
       "meshFaces": 54
     },
     {
       "name": "turret",
       "file": "turret.glb",
-      "bytes": 20900,
+      "bytes": 20916,
       "meshFaces": 126
     },
     {
       "name": "rocket",
       "file": "rocket.glb",
-      "bytes": 38932,
+      "bytes": 38948,
       "meshFaces": 80
     },
     {
@@ -53,7 +53,7 @@
     {
       "name": "beacon",
       "file": "beacon.glb",
-      "bytes": 17768,
+      "bytes": 17784,
       "meshFaces": 112
     },
     {

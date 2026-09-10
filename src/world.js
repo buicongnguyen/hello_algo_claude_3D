@@ -16,10 +16,17 @@ export class World {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    this.renderer.toneMappingExposure = 0.96;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.models = new Map();
+    this.assetResources = new Set();
+    this.effects = [];
+    this.effectPool = [];
+    this.markers = [];
+    this.cameraYaw = Math.atan2(9.5, 15);
+    this.desiredCamera = new THREE.Vector3();
+    this.desiredTarget = new THREE.Vector3();
     this.shared = new THREE.Group();
     this.mission = new THREE.Group();
     this.scene.add(this.shared, this.mission);
@@ -45,13 +52,19 @@ export class World {
       loaded += 1;
       onProgress(loaded / MODEL_NAMES.length, name);
     }));
+    for (const model of this.models.values()) model.traverse(child => {
+      if (child.geometry) this.assetResources.add(child.geometry);
+      if (child.material) this.assetResources.add(child.material);
+    });
+    this.pulseGeometry = new THREE.RingGeometry(0.75, 1, 32);
+    this.assetResources.add(this.pulseGeometry);
     this.addLandmarks();
   }
 
   buildEnvironment() {
-    const hemi = new THREE.HemisphereLight(0xdaf5ff, 0x725236, 2.35);
+    const hemi = new THREE.HemisphereLight(0xc5ecff, 0xb38957, 1.55);
     this.scene.add(hemi);
-    this.sun = new THREE.DirectionalLight(0xfff1d0, 4.2);
+    this.sun = new THREE.DirectionalLight(0xffe4bb, 2.2);
     this.sun.position.set(-12, 25, 10);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1024, 1024);
@@ -88,19 +101,49 @@ export class World {
     this.shared.add(boardwalk);
 
     const cliff = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 7.5, 2.2, 20, 1, false, 0, Math.PI), new THREE.MeshStandardMaterial({ color: 0x76604d, roughness: 1 }));
-    cliff.position.set(15, 0.65, -8);
+    cliff.position.set(22, -0.4, -11);
     cliff.rotation.y = -Math.PI / 2;
     cliff.receiveShadow = true;
     this.shared.add(cliff);
 
+    const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ roughness: 1 }), 34);
+    const rock = new THREE.Object3D();
     for (let i = 0; i < 34; i += 1) {
-      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.22 + (i % 4) * 0.07, 0), new THREE.MeshStandardMaterial({ color: i % 2 ? 0xc3915e : 0xa87854, roughness: 1 }));
       const angle = i * 2.399;
       const radius = 17 + (i % 3) * 1.3;
       rock.position.set(Math.cos(angle) * radius, 0.52, Math.sin(angle) * radius);
-      rock.scale.y = 0.55;
-      this.shared.add(rock);
+      const size = 0.22 + (i % 4) * 0.07;
+      rock.scale.set(size, size * 0.55, size);
+      rock.updateMatrix();
+      rocks.setMatrixAt(i, rock.matrix);
+      rocks.setColorAt(i, new THREE.Color(i % 2 ? 0xc3915e : 0xa87854));
     }
+    this.shared.add(rocks);
+
+    const foam = new THREE.Mesh(new THREE.RingGeometry(20.2, 21.3, 96), new THREE.MeshBasicMaterial({ color: 0xd0faf6, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+    foam.rotation.x = -Math.PI / 2;
+    foam.position.y = -0.48;
+    this.shared.add(foam);
+    this.foam = foam;
+
+    // Low ground patches give each landmark an identity without hiding targets.
+    for (const [x, z, radius] of [[-15, -2, 2.3], [15, 4, 2.4], [10, 13, 2.3], [-9, 14, 2.6], [13, -9, 2.8]]) {
+      const patch = new THREE.Mesh(new THREE.CircleGeometry(radius, 14), new THREE.MeshStandardMaterial({ color: 0x9fad60, roughness: 1 }));
+      patch.rotation.x = -Math.PI / 2; patch.position.set(x, 0.45, z); this.shared.add(patch);
+    }
+    const grasses = new THREE.InstancedMesh(new THREE.ConeGeometry(0.14, 0.58, 4), new THREE.MeshStandardMaterial({ color: 0x659d54, roughness: 1 }), 70);
+    for (let i = 0; i < 70; i++) {
+      const angle = i * 2.399;
+      const radius = 16.3 + (i % 4) * 0.5;
+      rock.position.set(Math.cos(angle) * radius, 0.7, Math.sin(angle) * radius);
+      rock.scale.setScalar(0.6 + (i % 3) * 0.3); rock.updateMatrix(); grasses.setMatrixAt(i, rock.matrix);
+    }
+    this.shared.add(grasses);
+    const planks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.13, 0.035, 3.1), new THREE.MeshStandardMaterial({ color: 0x784a2a }), 20);
+    for (let i = 0; i < 20; i++) {
+      rock.position.set(-3.1 + i * 0.53, 0.81, -8.5); rock.scale.setScalar(1); rock.updateMatrix(); planks.setMatrixAt(i, rock.matrix);
+    }
+    this.shared.add(planks);
 
     const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, depthWrite: false });
     for (let i = 0; i < 7; i += 1) {
@@ -119,12 +162,14 @@ export class World {
     const light = this.createActor("lighthouse", { x: 15, z: -9 }, 0.82, this.shared);
     light.rotation.y = 0.35;
     const rocket = this.createActor("rocket", { x: -14, z: -9 }, 0.72, this.shared);
+    this.rocket = rocket;
     rocket.rotation.y = -0.25;
     [[-16, -3], [-15, 5], [16, 5], [11, 13], [-8, 15]].forEach(([x, z], i) => {
       const palm = this.createActor("palm", { x, z }, 0.8 + (i % 2) * 0.14, this.shared);
       palm.rotation.y = i;
     });
     this.bolt = this.createActor("bolt", { x: -3, z: -4 }, 0.95, this.shared);
+    this.obstacles = [{ x: 15, z: -9, radius: 1.3 }, { x: -14, z: -9, radius: 0.9 }, ...[[-16, -3], [-15, 5], [16, 5], [11, 13], [-8, 15]].map(([x, z]) => ({ x, z, radius: 0.3 }))];
 
     const beamMat = new THREE.MeshBasicMaterial({ color: 0x8ef5ff, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide });
     this.beamPivot = new THREE.Group();
@@ -157,7 +202,50 @@ export class World {
       }
     });
     parent.add(object);
+    object.userData.limbs = [];
+    object.traverse(child => { if (/^(Hip|ShoulderPivot)_/.test(child.name)) object.userData.limbs.push(child); });
     return object;
+  }
+
+  animateActor(object, time, moving) {
+    for (const limb of object.userData.limbs || []) {
+      const side = limb.name.includes("_L") ? 1 : -1;
+      const arm = limb.name.startsWith("Shoulder");
+      limb.rotation.x = moving ? Math.sin(time * 11) * 0.42 * side * (arm ? -1 : 1) : 0;
+    }
+  }
+
+  constrainPlayer(player) {
+    for (const obstacle of this.obstacles || []) {
+      const dx = player.x - obstacle.x;
+      const dz = player.z - obstacle.z;
+      const d = Math.hypot(dx, dz);
+      const radius = obstacle.radius + player.radius;
+      if (d < radius) {
+        player.x = obstacle.x + (d ? dx / d : 1) * radius;
+        player.z = obstacle.z + (d ? dz / d : 0) * radius;
+      }
+    }
+  }
+
+  label(parent, text, color, height) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512; canvas.height = 96;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "rgba(4, 27, 43, .92)";
+    ctx.roundRect(0, 0, 512, 96, 22); ctx.fill();
+    ctx.font = "bold 30px Segoe UI, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = `#${new THREE.Color(color).getHexString()}`;
+    ctx.fillText(text, 256, 48, 480);
+    const map = new THREE.CanvasTexture(canvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map, depthTest: false }));
+    sprite.position.y = height;
+    sprite.scale.set(text.length < 4 ? 1.8 : 5.5, text.length < 4 ? 0.8 : 1.04, 1);
+    sprite.renderOrder = 5;
+    parent.add(sprite);
+    return sprite;
   }
 
   createMarker(position, color = 0xffd166, radius = 1.2) {
@@ -172,6 +260,7 @@ export class World {
     group.position.set(position.x, position.y || 0, position.z);
     group.userData.ring = ring;
     this.mission.add(group);
+    this.markers.push(group);
     return group;
   }
 
@@ -184,16 +273,50 @@ export class World {
   }
 
   pulse(position, radius, color = 0x65e5ff) {
-    const mesh = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.9, 48), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false }));
+    if (this.effects.length >= 24) return null;
+    const mesh = this.effectPool.pop() || new THREE.Mesh(this.pulseGeometry, new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: false }));
+    mesh.material.color.set(color);
+    mesh.material.opacity = 0.95;
+    mesh.scale.setScalar(0.1);
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(position.x, 0.72, position.z);
     mesh.userData.effect = { age: 0, duration: 0.55, radius };
     this.mission.add(mesh);
+    this.effects.push(mesh);
     return mesh;
   }
 
   clearMission() {
-    this.mission.clear();
+    for (const mesh of this.effects) { mesh.removeFromParent(); this.effectPool.push(mesh); }
+    this.effects.length = 0;
+    for (const child of [...this.mission.children]) this.release(child);
+    this.markers.length = 0;
+    this.launchTime = null;
+    if (this.rocket) this.rocket.position.y = 0.55;
+  }
+
+  release(object) {
+    object.removeFromParent();
+    const disposable = new Set();
+    object.traverse(child => {
+      if (child.geometry && !this.assetResources.has(child.geometry)) disposable.add(child.geometry);
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) if (material && !this.assetResources.has(material)) {
+        disposable.add(material);
+        if (material.map) disposable.add(material.map);
+      }
+    });
+    for (const resource of disposable) resource.dispose();
+  }
+
+  launchRocket() {
+    this.launchTime = 0;
+  }
+
+  setCampaign(progress) {
+    const fragments = Math.floor(progress.completed.length / 3);
+    if (this.beamPivot) this.beamPivot.children[0].material.opacity = 0.06 + fragments * 0.04;
+    this.friendAwake = progress.completed.includes("signal:wake");
   }
 
   setQuality(value) {
@@ -216,34 +339,48 @@ export class World {
   update(dt, focus, reducedMotion = false) {
     this.clock += dt;
     this.water.position.y = -0.55 + Math.sin(this.clock * 0.7) * 0.06;
+    if (this.foam) this.foam.scale.setScalar(1 + Math.sin(this.clock * 0.65) * 0.012);
     this.water.material.color.setHSL(0.55 + Math.sin(this.clock * 0.15) * 0.012, 0.73, 0.42);
     if (this.beamPivot) this.beamPivot.rotation.y += dt * 0.22;
-    this.mission.traverse(object => {
-      if (object.userData.ring) {
-        object.userData.ring.rotation.z += dt * 0.8;
-        object.userData.ring.material.opacity = 0.65 + Math.sin(this.clock * 4) * 0.22;
-      }
-      if (object.userData.effect) {
+    for (const marker of this.markers) if (marker.visible && !reducedMotion) {
+      marker.userData.ring.rotation.z += dt * 0.8;
+      marker.userData.ring.material.opacity = 0.83 + Math.sin(this.clock * 4) * 0.12;
+    }
+    for (let index = this.effects.length - 1; index >= 0; index -= 1) {
+        const object = this.effects[index];
         const effect = object.userData.effect;
         effect.age += dt;
         const amount = Math.min(1, effect.age / effect.duration);
-        object.scale.setScalar(1 + amount * effect.radius);
+        object.scale.setScalar((0.1 + amount * 0.9) * effect.radius);
         object.material.opacity = 1 - amount;
-        if (amount >= 1) object.parent?.remove(object);
+        if (amount >= 1) { object.removeFromParent(); this.effects.splice(index, 1); this.effectPool.push(object); }
+    }
+    if (this.launchTime != null) {
+      this.launchTime += dt;
+      this.rocket.position.y = 0.55 + Math.min(65, this.launchTime * this.launchTime * 1.8);
+    }
+    if (this.bolt && focus && this.friendAwake) {
+      const d = Math.hypot(focus.x - this.bolt.position.x, focus.z - this.bolt.position.z);
+      if (d > 2.8) {
+        this.bolt.rotation.y = Math.atan2(focus.x - this.bolt.position.x, focus.z - this.bolt.position.z);
+        this.bolt.position.x += (focus.x - this.bolt.position.x) / d * Math.min(d - 2.8, dt * 4.2);
+        this.bolt.position.z += (focus.z - this.bolt.position.z) / d * Math.min(d - 2.8, dt * 4.2);
+        this.bolt.position.y = 0.55 + Math.abs(Math.sin(this.clock * 9)) * 0.06;
       }
-    });
+    } else if (this.bolt && !focus) this.bolt.position.lerp(new THREE.Vector3(-3, 0.55, -4), 1 - Math.exp(-dt * 2));
     if (focus) {
-      const desired = new THREE.Vector3(focus.x + 9.5, 10.8, focus.z + 13.5);
-      const target = new THREE.Vector3(focus.x, 0.8, focus.z - 1.5);
+      const desired = this.desiredCamera.set(focus.x + 9.5, 10.8, focus.z + 13.5);
+      const target = this.desiredTarget.set(focus.x, 0.8, focus.z - 1.5);
+      if (this.launchTime != null) { target.y += Math.min(9, this.rocket.position.y * 0.7); desired.y += Math.min(6, this.rocket.position.y * 0.4); }
       const damping = reducedMotion ? 1 : 1 - Math.exp(-dt * 4.5);
       this.camera.position.lerp(desired, damping);
       this.cameraTarget.lerp(target, damping);
       this.camera.lookAt(this.cameraTarget);
     } else {
       const orbit = reducedMotion ? 0.72 : 0.72 + Math.sin(this.clock * 0.07) * 0.09;
-      const desired = new THREE.Vector3(Math.cos(orbit) * 22, 12.5, Math.sin(orbit) * 22);
+      const desired = this.desiredCamera.set(Math.cos(orbit) * 22, 12.5, Math.sin(orbit) * 22);
       this.camera.position.lerp(desired, 1 - Math.exp(-dt * 1.8));
-      this.cameraTarget.lerp(new THREE.Vector3(0, 1, -1), 1 - Math.exp(-dt * 1.8));
+      this.cameraTarget.lerp(this.desiredTarget.set(0, 1, -1), 1 - Math.exp(-dt * 1.8));
       this.camera.lookAt(this.cameraTarget);
     }
     this.renderer.render(this.scene, this.camera);
