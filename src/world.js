@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { dressRobot } from "./equipment.js";
 
-const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm"];
+const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm", "octopus", "starfish", "snail", "clam", "coral_cluster", "reef_arch", "salvage_tower", "moon_mushroom", "software_disc", "prism_armor", "twin_thrusters", "halo_antenna"];
 
 export class World {
   constructor(canvas, settings) {
@@ -88,17 +89,20 @@ export class World {
     island.position.y = -0.15;
     island.receiveShadow = true;
     this.shared.add(island);
+    this.island = island;
 
     const inner = new THREE.Mesh(new THREE.CircleGeometry(18.5, 64), new THREE.MeshStandardMaterial({ color: 0xf6db91, roughness: 0.98 }));
     inner.rotation.x = -Math.PI / 2;
     inner.position.y = 0.44;
     inner.receiveShadow = true;
     this.shared.add(inner);
+    this.ground = inner;
 
     const boardwalk = new THREE.Mesh(new THREE.BoxGeometry(11, 0.28, 3.2), new THREE.MeshStandardMaterial({ color: 0x9e6236, roughness: 0.9 }));
     boardwalk.position.set(2, 0.65, -8.5);
     boardwalk.receiveShadow = true;
     this.shared.add(boardwalk);
+    this.boardwalk = boardwalk;
 
     const cliff = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 7.5, 2.2, 20, 1, false, 0, Math.PI), new THREE.MeshStandardMaterial({ color: 0x76604d, roughness: 1 }));
     cliff.position.set(22, -0.4, -11);
@@ -144,6 +148,7 @@ export class World {
       rock.position.set(-3.1 + i * 0.53, 0.81, -8.5); rock.scale.setScalar(1); rock.updateMatrix(); planks.setMatrixAt(i, rock.matrix);
     }
     this.shared.add(planks);
+    this.planks = planks;
 
     const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, depthWrite: false });
     for (let i = 0; i < 7; i += 1) {
@@ -159,17 +164,20 @@ export class World {
   }
 
   addLandmarks() {
-    const light = this.createActor("lighthouse", { x: 15, z: -9 }, 0.82, this.shared);
+    this.landmarks = new THREE.Group(); this.shared.add(this.landmarks);
+    const light = this.createActor("lighthouse", { x: 15, z: -9 }, 0.82, this.landmarks);
     light.rotation.y = 0.35;
-    const rocket = this.createActor("rocket", { x: -14, z: -9 }, 0.72, this.shared);
+    const rocket = this.createActor("rocket", { x: -14, z: -9 }, 0.72, this.landmarks);
     this.rocket = rocket;
     rocket.rotation.y = -0.25;
     [[-16, -3], [-15, 5], [16, 5], [11, 13], [-8, 15]].forEach(([x, z], i) => {
-      const palm = this.createActor("palm", { x, z }, 0.8 + (i % 2) * 0.14, this.shared);
+      const palm = this.createActor("palm", { x, z }, 0.8 + (i % 2) * 0.14, this.landmarks);
       palm.rotation.y = i;
     });
-    this.bolt = this.createActor("bolt", { x: -3, z: -4 }, 0.95, this.shared);
+    this.bolt = this.createActor("bolt", { x: -3, z: -4 }, 0.95, this.landmarks);
     this.obstacles = [{ x: 15, z: -9, radius: 1.3 }, { x: -14, z: -9, radius: 0.9 }, ...[[-16, -3], [-15, 5], [16, 5], [11, 13], [-8, 15]].map(([x, z]) => ({ x, z, radius: 0.3 }))];
+    this.defaultObstacles = [...this.obstacles];
+    this.mapLandmarks = this.defaultObstacles;
 
     const beamMat = new THREE.MeshBasicMaterial({ color: 0x8ef5ff, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide });
     this.beamPivot = new THREE.Group();
@@ -178,7 +186,56 @@ export class World {
     beam.rotation.x = -Math.PI / 2;
     beam.position.z = -10;
     this.beamPivot.add(beam);
-    this.shared.add(this.beamPivot);
+    this.landmarks.add(this.beamPivot);
+  }
+
+  setScenario(theme) {
+    this.theme = theme;
+    const palettes = {
+      coral: [0x74dfdf, 0x76d8d2, 0xe9b3a8, 0xffccdf],
+      scrapyard: [0x7b71ba, 0x9a8acc, 0x9380aa, 0xcbbdff],
+      moonpool: [0x19294d, 0x334d78, 0x557b94, 0x99bfff],
+    };
+    const palette = palettes[theme] || [0x6fc8ef, 0x9bd9ee, 0xf6db91, 0xffe4bb];
+    this.scene.background.setHex(palette[0]); this.scene.fog.color.setHex(palette[1]);
+    this.ground.material.color.setHex(palette[2]); this.island.material.color.setHex(palette[2]);
+    this.sun.color.setHex(palette[3]); this.sun.intensity = theme === "moonpool" ? 1.6 : 2.2;
+    if (this.landmarks) this.landmarks.visible = !theme;
+    this.boardwalk.visible = this.planks.visible = !theme;
+    this.obstacles = theme ? [] : [...(this.defaultObstacles || [])];
+    this.mapLandmarks = [...this.obstacles];
+    if (!theme) return;
+    const model = theme === "coral" ? "coral_cluster" : theme === "scrapyard" ? "salvage_tower" : "moon_mushroom";
+    // All decoration lives on the rim; required paths and pickups stay open.
+    for (let i = 0; i < 8; i++) {
+      const angle = i * Math.PI / 4 + 0.12;
+      const p = { x: Math.cos(angle) * 17.2, z: Math.sin(angle) * 17.2 };
+      const object = this.createActor(model, p, 0.95 + i % 2 * 0.2);
+      object.rotation.y = -angle;
+      this.obstacles.push({ ...p, radius: 0.65 }); this.mapLandmarks.push(p);
+    }
+    for (const [x, z, radius] of [[-10, -1, 2.5], [7, -10, 2.5], [9, 9, 1.7]]) {
+      const pool = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), new THREE.MeshStandardMaterial({ color: theme === "scrapyard" ? 0x705bc6 : 0x399cae, emissive: theme === "moonpool" ? 0x164f76 : 0x000000, roughness: 0.3 }));
+      pool.rotation.x = -Math.PI / 2; pool.position.set(x, 0.46, z); this.mission.add(pool);
+    }
+  }
+
+  showRobotPreview(equipment) {
+    this.clearMission();
+    this.previewActor = this.createActor("kai", { x: 0, z: 0 }, 1.2);
+    dressRobot(this, this.previewActor, equipment);
+    this.previewActor.rotation.y = this.previewAngle ?? 0.4;
+  }
+
+  animateSeaLife(object, time, open = true) {
+    if (!object.userData.seaJoints) {
+      object.userData.seaJoints = [];
+      object.traverse(child => { if (/^(Tentacle_|ClamLid)/.test(child.name)) object.userData.seaJoints.push(child); });
+    }
+    for (const joint of object.userData.seaJoints) {
+      if (joint.name.startsWith("Tentacle")) joint.rotation.y = Math.sin(time * 2 + Number.parseInt(joint.name.split("_")[1])) * 0.15;
+      else joint.rotation.x = open ? -0.65 + Math.sin(time * 1.5) * 0.08 : -0.08;
+    }
   }
 
   fallback(name) {
@@ -230,19 +287,20 @@ export class World {
 
   label(parent, text, color, height) {
     const canvas = document.createElement("canvas");
-    canvas.width = 512; canvas.height = 96;
+    const compact = text.length < 4;
+    canvas.width = compact ? 128 : 512; canvas.height = 96;
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "rgba(4, 27, 43, .92)";
-    ctx.roundRect(0, 0, 512, 96, 22); ctx.fill();
-    ctx.font = "bold 30px Segoe UI, sans-serif";
+    ctx.roundRect(0, 0, canvas.width, 96, 22); ctx.fill();
+    ctx.font = `bold ${compact ? 56 : 30}px Segoe UI, sans-serif`;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillStyle = `#${new THREE.Color(color).getHexString()}`;
-    ctx.fillText(text, 256, 48, 480);
+    ctx.fillText(text, canvas.width / 2, 48, canvas.width - 24);
     const map = new THREE.CanvasTexture(canvas);
     map.colorSpace = THREE.SRGBColorSpace;
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map, depthTest: false }));
     sprite.position.y = height;
-    sprite.scale.set(text.length < 4 ? 1.8 : 5.5, text.length < 4 ? 0.8 : 1.04, 1);
+    sprite.scale.set(compact ? 1.3 : 5.5, compact ? 0.98 : 1.04, 1);
     sprite.renderOrder = 5;
     parent.add(sprite);
     return sprite;
@@ -287,12 +345,14 @@ export class World {
   }
 
   clearMission() {
+    this.previewActor = null;
     for (const mesh of this.effects) { mesh.removeFromParent(); this.effectPool.push(mesh); }
     this.effects.length = 0;
     for (const child of [...this.mission.children]) this.release(child);
     this.markers.length = 0;
     this.launchTime = null;
     if (this.rocket) this.rocket.position.y = 0.55;
+    if (this.ground) this.setScenario(null);
   }
 
   release(object) {
@@ -368,7 +428,12 @@ export class World {
         this.bolt.position.y = 0.55 + Math.abs(Math.sin(this.clock * 9)) * 0.06;
       }
     } else if (this.bolt && !focus) this.bolt.position.lerp(new THREE.Vector3(-3, 0.55, -4), 1 - Math.exp(-dt * 2));
-    if (focus) {
+    if (this.previewActor) {
+      this.previewActor.rotation.y += reducedMotion ? 0 : dt * 0.25;
+      this.camera.position.lerp(innerWidth < 620 ? this.desiredCamera.set(6, 4.8, 9.5) : this.desiredCamera.set(4.5, 3.8, 7), 1 - Math.exp(-dt * 7));
+      this.cameraTarget.lerp(innerWidth < 620 ? this.desiredTarget.set(0, 0.65, 0) : this.desiredTarget.set(-1.2, 1.8, 0.7), 1 - Math.exp(-dt * 7));
+      this.camera.lookAt(this.cameraTarget);
+    } else if (focus) {
       const desired = this.desiredCamera.set(focus.x + 9.5, 10.8, focus.z + 13.5);
       const target = this.desiredTarget.set(focus.x, 0.8, focus.z - 1.5);
       if (this.launchTime != null) { target.y += Math.min(9, this.rocket.position.y * 0.7); desired.y += Math.min(6, this.rocket.position.y * 0.4); }

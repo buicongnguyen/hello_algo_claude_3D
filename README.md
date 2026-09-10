@@ -9,6 +9,10 @@ This is a playable browser-game foundation, with a documented roadmap toward a m
 ## Features
 
 - Five story chapters and fifteen missions.
+- **Reef Expeditions:** Coral Cove Rescue, Neon Scrap Safari and Moonpool Parade—three open stages with rescue, software salvage and snail escort objectives.
+- **Robot Workshop:** six paint schemes, three software programs and three Blender-modeled attachments. Discoveries persist through retries and browser reloads.
+- Octopus ink helpers, starfish friends, NORI the escort snail and clam shield-repair stations.
+- A camera-aligned island minimap showing KAI, enemies, loot, friends, landmarks and the objective.
 - **Beach Brawl:** an immediately available three-wave zombie robot beach party, independent of campaign unlocks.
 - Bubble Blaster and chaining Arc Fork pickups; tiny zombie bots, pouncing robot dogs and diving drones.
 - Freeze Pops, a summoned crab crew, and scrap-funded repairs that turn defeated robots into teammates.
@@ -33,7 +37,12 @@ This is a playable browser-game foundation, with a documented roadmap toward a m
 
 Walk over glowing items to pick them up. Touch players have a movement stick and labeled Fire, Pulse, Dash, Use, Freeze and Call buttons. Start with **Beach Brawl · Play now** for immediate fighting, or **Begin journey** for the story campaign.
 
+Choose **Reef Expeditions · New stages** to discover permanent equipment. Walk over CDs and parts to install them immediately, then use **Robot Workshop** between runs to change paint and choose your loadout. Only one software program is active at a time; physical parts occupy body, back and head slots. The clam repairs one missing shield with `E` / Use every 16 seconds. Stay within 6 m of NORI and clear robots within 3.5 m to keep the snail moving.
+
+The minimap is oriented like your movement controls. White arrow = KAI, red circles = enemies, green diamonds = friends, gold diamonds = loot, star = current objective. Discovery ownership and expedition scores are independent of the original campaign; the campaign Reset button preserves them.
+
 See [COMBAT_UPDATE.md](./COMBAT_UPDATE.md) for the combat design, balance rules, resource limits and verification.
+See [EXPEDITIONS_PLAN.md](./EXPEDITIONS_PLAN.md) for the new scenarios, equipment rules, Blender asset plan and logic review.
 
 ## Development
 

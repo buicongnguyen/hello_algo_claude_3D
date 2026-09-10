@@ -57,7 +57,7 @@ try {
     const api = window.__ROBOT_BEACH__;
     return { loaded: api.world.models.size, actualBlender: Boolean(api.world.models.get("kai").getObjectByName("KAI_Robot")), limbs: api.game.player.object.userData.limbs.length };
   });
-  if (assets.loaded !== 12 || !assets.actualBlender || assets.limbs !== 4) throw new Error(`Blender asset/pivot regression: ${JSON.stringify(assets)}`);
+  if (assets.loaded !== 24 || !assets.actualBlender || assets.limbs !== 4) throw new Error(`Blender asset/pivot regression: ${JSON.stringify(assets)}`);
 
   const missionSetup = await page.evaluate(async () => {
     const api = window.__ROBOT_BEACH__;
@@ -176,10 +176,69 @@ try {
   await touchSession.detach();
   if (await mobile.evaluate(() => window.__ROBOT_BEACH__.game.combat.ammo) >= 36) throw new Error("Touch Fire did not shoot");
   if (await mobile.evaluate(() => window.__ROBOT_BEACH__.input.held("shoot"))) throw new Error("Cancelled touch left firing stuck on");
+  await mobile.evaluate(() => { const api = window.__ROBOT_BEACH__; api.game.stop(); api.ui.showExpeditions(); });
+  await mobile.getByRole("button", { name: "Play Coral Cove Rescue" }).click();
+  await mobile.getByRole("button", { name: "Enter mission" }).click();
+  if (!await mobile.locator("#minimap").isVisible()) throw new Error("Mobile minimap missing");
+  const layout = await mobile.evaluate(() => {
+    const map = document.querySelector(".minimap").getBoundingClientRect();
+    const controls = document.querySelector(".touch-actions").getBoundingClientRect();
+    const counter = document.querySelector(".progress-card").getBoundingClientRect();
+    const gear = document.querySelector("#combatPanel").getBoundingClientRect();
+    return { overflow: document.documentElement.scrollWidth > innerWidth, overlap: map.bottom > controls.top && map.right > controls.left, counterOverlap: counter.bottom > gear.top };
+  });
+  if (layout.overflow || layout.overlap || layout.counterOverlap) throw new Error(`Mobile HUD overlap: ${JSON.stringify(layout)}`);
   await mobile.close();
 
+  await page.evaluate(() => { const api = window.__ROBOT_BEACH__; api.game.stop(); api.ui.showTitle(); });
+  await page.getByRole("button", { name: "Reef Expeditions · New stages" }).click();
+  if (await page.locator(".expedition-card").count() !== 3) throw new Error("Expected three expedition stages");
+  await page.getByRole("button", { name: "Play Coral Cove Rescue" }).click();
+  await page.getByRole("button", { name: "Enter mission" }).click();
+  await page.evaluate(() => {
+    const { game } = window.__ROBOT_BEACH__;
+    const part = game.expedition.discoveries.find(p => p.id === "armor");
+    game.player.x = part.x; game.player.z = part.z;
+  });
+  await page.waitForFunction(() => window.__ROBOT_BEACH__.game.progress.equipment.equipped.body === "armor");
+  if (!await page.evaluate(() => window.__ROBOT_BEACH__.game.player.object.userData.attachments.some(p => p.getObjectByName("Prism_Armor")))) throw new Error("Blender armor not attached to KAI");
+  await page.evaluate(() => { const api = window.__ROBOT_BEACH__; api.game.stop(); api.ui.showWorkshop(); });
+  await page.getByRole("button", { name: "Candy pink", exact: true }).click();
+  const paintState = await page.evaluate(() => {
+    const api = window.__ROBOT_BEACH__;
+    const torso = api.world.previewActor.getObjectByName("Torso");
+    return { paint: api.game.progress.equipment.paint, color: torso?.material.color.getHex(), saved: JSON.parse(localStorage.getItem("robot-beach-3d-signalbreak-v1")).equipment.paint };
+  });
+  if (paintState.paint !== "candy" || paintState.saved !== "candy" || paintState.color !== 0xff83cf) throw new Error(`Workshop paint did not reach the actual model: ${JSON.stringify(paintState)}`);
+  await page.getByRole("button", { name: /Prism Armor.*Equipped/ }).click();
+  if (await page.evaluate(() => window.__ROBOT_BEACH__.world.previewActor.userData.attachments.length) !== 0) throw new Error("Unequip left a ghost armor model");
+  await page.getByRole("button", { name: /Prism Armor.*Click to equip/ }).click();
+
+  const expeditionResources = await page.evaluate(() => {
+    const { game, world, expeditions, ui } = window.__ROBOT_BEACH__;
+    const cycle = () => {
+      for (const item of expeditions) {
+        game.begin(item);
+        for (const loot of game.expedition.discoveries) game.expedition.collect(loot);
+        game.expedition.update(0.1); world.update(0.1, game.player);
+        game.stop();
+      }
+      ui.showWorkshop(); world.update(0.1, null);
+      ui.showTitle(); world.update(0.1, null);
+      return { ...world.renderer.info.memory };
+    };
+    return { before: cycle(), after: cycle() };
+  });
+  if (expeditionResources.after.geometries > expeditionResources.before.geometries + 1 || expeditionResources.after.textures > expeditionResources.before.textures + 1) throw new Error(`Expedition / workshop resource growth: ${JSON.stringify(expeditionResources)}`);
+  console.log(`Expedition resource check: ${JSON.stringify(expeditionResources)}`);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: /Signalbreak/i }).waitFor({ state: "visible", timeout: 20_000 });
+  await page.getByRole("button", { name: "Robot Workshop", exact: true }).click();
+  if (!await page.getByRole("button", { name: "Candy pink", exact: true }).getAttribute("aria-pressed").then(v => v === "true")) throw new Error("Paint did not survive a browser reload");
+  if (!await page.evaluate(() => window.__ROBOT_BEACH__.game.progress.equipment.owned.includes("armor"))) throw new Error("Discovered armor did not survive reload");
+
   if (errors.length) throw new Error(`Browser errors:\n${errors.join("\n")}`);
-  console.log("Smoke test passed: 12 Blender models, 15 campaign stages, Beach Brawl, keyboard/touch fire, pause, mobile layout and restart resource stability.");
+  console.log("Smoke test passed: 24 Blender models, campaign, Brawl, three expeditions, Workshop, saved equipment, minimap, keyboard/touch controls and resource stability.");
 } finally {
   if (browser) await browser.close();
   server?.kill("SIGTERM");

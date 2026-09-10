@@ -23,9 +23,11 @@
         <div class="title-card glass">
           <p class="eyebrow">A Robot Beach story</p>
           <h1 id="gameTitle"><span>Signal</span>break</h1>
-          <p class="tagline">Crash a zombie robot beach party. Grab silly weapons. Build a tiny team.</p>
+          <p class="tagline">New shores. More friends. Build your own colorful little hero.</p>
           <div class="button-stack">
-            <button id="brawlButton" class="primary">Beach Brawl · Play now</button>
+            <button id="expeditionsButton" class="primary">Reef Expeditions · New stages</button>
+            <button id="brawlButton">Beach Brawl · Play now</button>
+            <button id="workshopButton">Robot Workshop</button>
             <button id="continueButton">Begin journey</button>
             <button id="missionsButton">Mission map</button>
             <button id="howButton" class="quiet">How to play</button>
@@ -34,6 +36,18 @@
           <div class="campaign-progress"><span id="campaignCount">0 / 15</span><div><i id="campaignBar"></i></div></div>
         </div>
         <p class="corner-note">Every little friend. One bright island.</p>
+      </section>
+
+      <section id="expeditionScreen" class="screen map-screen hidden" aria-labelledby="expeditionTitle">
+        <header class="map-header glass"><button class="icon-button" data-screen="title" aria-label="Back to title">←</button><div><p class="eyebrow">Explore · discover · upgrade</p><h2 id="expeditionTitle">Reef Expeditions</h2></div><button id="expeditionWorkshop" class="small">Workshop</button></header>
+        <p class="expedition-intro">Three shores, three ways to play. All stages are open. Every software disc and robot part you find stays in your workshop—even if you retry.</p>
+        <div id="expeditionCards" class="expedition-grid"></div>
+      </section>
+
+      <section id="workshopScreen" class="screen workshop-screen hidden" aria-labelledby="workshopTitle">
+        <header class="map-header glass"><button class="icon-button" data-screen="title" aria-label="Back to title">←</button><div><p class="eyebrow">Your robot · your style</p><h2 id="workshopTitle">Robot Workshop</h2></div><button id="workshopPlay" class="small">Expeditions</button></header>
+        <div class="workshop-panel glass"><p id="workshopSummary"></p><h3>Paint finish</h3><div id="paintChoices" class="paint-choices"></div><h3>Software & attachments</h3><p class="workshop-hint">One software program. Three physical slots. Find discs and parts in expeditions to unlock them.</p><div id="equipmentChoices" class="equipment-choices"></div></div>
+        <p class="preview-note glass">Live 3D preview · paint and equipment are saved automatically</p>
       </section>
 
       <section id="mapScreen" class="screen map-screen hidden" aria-labelledby="mapTitle">
@@ -55,7 +69,7 @@
           <div id="briefReward" class="reward-line"></div>
           <div class="button-row">
             <button id="launchButton" class="primary">Enter mission</button>
-            <button data-screen="map">Back</button>
+            <button id="briefBack">Back</button>
           </div>
         </div>
       </section>
@@ -67,6 +81,7 @@
         <div id="prompt" class="world-prompt hidden">E · INTERACT</div>
         <div id="message" class="message hidden" role="status"></div>
         <div id="combatPanel" class="combat-panel glass hidden"><strong id="weaponName"></strong><span id="weaponAmmo"></span><span id="gadgetCount"></span><small id="teamCount"></small><small>E / Use · repair a downed bot for 2 scrap</small></div>
+        <div class="minimap glass" title="White arrow: you · red: enemies · green: friends · gold: loot · star: objective"><canvas id="minimap" width="160" height="160" role="img" aria-label="Island map"></canvas><small>YOU △ · LOOT ◆ · GOAL ★</small></div>
         <div id="navigation" class="navigation glass hidden"><span id="navArrow" aria-hidden="true">↑</span><strong id="navLabel"></strong><small id="navDistance"></small></div>
         <div class="abilities glass"><div><kbd>Q</kbd><span>Pulse</span><i id="pulseMeter"></i></div><div><kbd>Shift</kbd><span>Dash</span><i id="dashMeter"></i></div><div><kbd>E</kbd><span>Interact</span></div></div>
         <div class="crosshair" aria-hidden="true"></div>

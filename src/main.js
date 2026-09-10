@@ -6,6 +6,8 @@ import { Game } from "./game.js";
 import { createProgress, earnedUpgrades, nextIncomplete } from "./rules.js";
 import { ALL_STAGES, BRAWL } from "./missions.js";
 import { Sound } from "./sound.js";
+import { EXPEDITIONS } from "./expedition-data.js";
+import { equipItem, EQUIPMENT, PAINTS } from "./equipment.js";
 
 const STORAGE_KEY = "robot-beach-3d-signalbreak-v1";
 
@@ -29,6 +31,18 @@ let game;
 let ui;
 
 ui = new UI(progress, {
+  preview: enabled => {
+    if (enabled) world.showRobotPreview(progress.equipment);
+    else if (world.previewActor) world.clearMission();
+  },
+  paint: id => { if (Object.hasOwn(PAINTS, id)) { progress.equipment.paint = id; saveProgress(progress); } },
+  equip: (id, remove) => {
+    if (!Object.hasOwn(EQUIPMENT, id) || !progress.equipment.owned.includes(id)) return;
+    if (remove) progress.equipment.equipped[EQUIPMENT[id].slot] = null;
+    else equipItem(progress.equipment, id);
+    world.previewAngle = EQUIPMENT[id].slot === "back" ? Math.PI + 0.4 : 0.4;
+    saveProgress(progress);
+  },
   continue: () => ui.showBriefing(nextIncomplete(progress)),
   brawl: () => ui.showBriefing(BRAWL),
   launch: item => { sound.unlock(); game.begin(item); },
@@ -42,7 +56,7 @@ ui = new UI(progress, {
   pause: () => game.pause(),
   reset: () => {
     if (!confirm("Reset all Signalbreak mission progress?")) return;
-    progress = createProgress({ settings: progress.settings });
+    progress = createProgress({ settings: progress.settings, equipment: progress.equipment, expeditionResults: progress.expeditionResults });
     saveProgress(progress);
     game.progress = progress;
     ui.setProgress(progress);
@@ -90,4 +104,4 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden && game.running && !game.paused) game.pause();
 });
 
-window.__ROBOT_BEACH__ = { world, game, ui, input, catalog: ALL_STAGES, brawl: BRAWL };
+window.__ROBOT_BEACH__ = { world, game, ui, input, catalog: ALL_STAGES, brawl: BRAWL, expeditions: EXPEDITIONS };

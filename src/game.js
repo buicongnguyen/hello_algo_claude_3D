@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { applyHit, earnedUpgrades, recordResult, sequenceStep } from "./rules.js";
 import { Combat } from "./combat.js";
+import { Expedition } from "./expeditions.js";
+import { dressRobot, equipmentStats } from "./equipment.js";
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -22,6 +24,8 @@ export class Game {
     this.item = item;
     this.stage = item.stage;
     this.world.clearMission();
+    this.world.setScenario?.(this.stage.theme || null);
+    this.expedition = null;
     this.input.clear();
     this.entities = [];
     this.time = this.stage.time;
@@ -60,12 +64,23 @@ export class Game {
     this.lastMove = { x: -Math.sin(this.world.cameraYaw || 0), z: -Math.cos(this.world.cameraYaw || 0) };
     this.setupMission();
     this.combat = new Combat(this);
+    this.refreshEquipment(false);
+    if (this.combat.enabled && this.progress.equipment.equipped.software === "frost") this.combat.freezeCharges = 1;
+    if (this.stage.type === "expedition") this.expedition = new Expedition(this);
     this.ui.showGame(item);
     this.running = true;
     this.paused = false;
     this.input.enabled = true;
     this.ui.dialogue(this.stage.dialogue);
     this.ui.message("Mission started");
+  }
+
+  refreshEquipment(preserveHealth = true) {
+    const previousMax = this.upgrades.maxShields;
+    this.upgrades = equipmentStats(earnedUpgrades(this.progress), this.progress.equipment, ["brawl", "expedition"].includes(this.stage.type));
+    this.shields = preserveHealth ? Math.min(this.upgrades.maxShields, this.shields + Math.max(0, this.upgrades.maxShields - previousMax)) : this.upgrades.maxShields;
+    this.player.speed = this.upgrades.moveSpeed;
+    dressRobot(this.world, this.player.object, this.progress.equipment);
   }
 
   setupMission() {
@@ -118,7 +133,7 @@ export class Game {
 
   setupRescue() {
     this.stage.positions.forEach((position, index) => {
-      const creature = this.makeEntity("creature", "crab", position, 0.88 + (index % 2) * 0.08, { id: index });
+      const creature = this.makeEntity("creature", ["crab", "starfish", "octopus", "snail", "clam"][index % 5], position, 0.88 + (index % 2) * 0.08, { id: index });
       creature.marker = this.world.createMarker(position, 0x65e5ff, 1.1);
       this.entities.push(creature);
     });
@@ -195,7 +210,7 @@ export class Game {
     let position = this.stage.type === "defense" && !boss
       ? this.approaches[index % this.approaches.length]
       : this.stage.type === "combat" ? this.stage.positions[index] : { x: Math.cos(angle) * radius, z: Math.sin(angle) * radius };
-    if (this.stage.type === "brawl" && distance(position, this.player) < 8) position = { x: -position.x, z: -position.z };
+    if (["brawl", "expedition"].includes(this.stage.type) && distance(position, this.player) < 8) position = { x: -position.x, z: -position.z };
     const variant = boss ? "captain" : ["bot", "dog", "drone"][index % 3];
     const model = variant === "dog" ? "zombie_dog" : variant === "drone" ? "rust_drone" : "rust_scout";
     const enemy = this.makeEntity(boss ? "boss" : "enemy", model, position, boss ? 1.24 : variant === "bot" ? 0.56 : 0.78, { health, maxHealth: health, speed: boss ? 3.7 : variant === "dog" ? 3.4 : 2.4, boss, variant, attackState: "approach", attackTime: 0, frozen: 0 });
@@ -324,13 +339,14 @@ export class Game {
       });
     }
     if (this.stage.type === "rescue") this.updateTide(dt);
-    if (["combat", "defense", "boss", "finale", "collect", "brawl"].includes(this.stage.type)) this.updateEnemies(dt);
+    if (["combat", "defense", "boss", "finale", "collect", "brawl", "expedition"].includes(this.stage.type)) this.updateEnemies(dt);
     if (!this.running) return;
     if (this.shields <= 0) return this.finish(false, "KAI's shield is empty. Protect yourself as well as the relay.");
     if (this.stage.type === "defense") this.updateDefense(dt);
     if (this.stage.type === "boss") this.updateBoss(dt, this.boss);
     if (this.stage.type === "race") this.updateRace();
     if (this.stage.type === "finale") this.updateFinale(dt);
+    this.expedition?.update(dt);
     this.entities.forEach(entity => {
       if (entity.active && ["cell", "node"].includes(entity.kind)) entity.object.rotation.y += dt * 0.8;
       if (entity.marker?.userData.ring) entity.marker.visible = entity.active && !entity.carried;
@@ -557,6 +573,7 @@ export class Game {
   }
 
   interact() {
+    if (this.expedition?.interact()) return;
     if (this.finalBeacon && !this.carry && distance(this.player, this.finalBeacon) < 2.2) {
       if (this.progressCount < this.stage.count) return this.ui.message("Bring every beach friend to safety first", true);
       return this.finish(true, "The tide beacon is offline and the second fragment is secure.");
@@ -652,6 +669,10 @@ export class Game {
   }
 
   updatePrompt() {
+    if (this.expedition) {
+      this.ui.prompt(this.expedition.prompt() || (this.combat.repairTarget() ? "E · REPAIR TEAMMATE · 2 SCRAP" : ""));
+      return;
+    }
     let text = "";
     if (this.finalBeacon && !this.carry && this.progressCount >= this.stage.count && distance(this.player, this.finalBeacon) < 2.2) text = "E · DISABLE TIDE BEACON";
     else if (this.stage.type === "rescue") {
@@ -666,6 +687,7 @@ export class Game {
   }
 
   progressText() {
+    if (this.expedition) return this.expedition.progressText();
     if (this.stage.type === "brawl") return `Wave ${Math.max(1, this.combat.wave)} / 3 · ${this.combat.kills} / 24`;
     if (this.stage.type === "roam") return "Island restored";
     if (this.stage.type === "defense" && this.phase === "ready") return "Ready · press E";
@@ -696,9 +718,11 @@ export class Game {
     });
     const target = this.objectiveTarget();
     this.ui.navigation?.(target, this.player, this.world.cameraYaw || 0);
+    this.ui.minimap?.draw(this, target);
   }
 
   objectiveTarget() {
+    if (this.expedition) return this.expedition.objective();
     const combatTarget = this.combat.objective();
     if (combatTarget) return combatTarget;
     const nearest = (entities, label) => {
@@ -731,7 +755,7 @@ export class Game {
     this.ui.modal({ icon: "Ⅱ", eyebrow: "Mission paused", title: this.stage.name, text: this.stage.objective, actions: [
       { label: "Resume", run: () => { this.input.clear(); this.input.enabled = true; this.paused = false; } },
       { label: "Restart", run: () => this.begin(this.item) },
-      { label: "Mission map", run: () => { this.stop(); this.ui.showMap(); } },
+      { label: this.expedition ? "Expeditions" : "Mission map", run: () => { this.stop(); this.expedition ? this.ui.showExpeditions() : this.ui.showMap(); } },
     ] });
   }
 
@@ -743,6 +767,19 @@ export class Game {
     this.input.clear();
     this.ui.hideDialogue?.();
     this.ui.prompt("");
+    if (won && this.expedition) {
+      const score = this.combat.kills * 100 + this.shields * 100 + Math.max(0, Math.floor(this.time)) * 5;
+      this.progress.expeditionResults[this.stage.id] = Math.max(this.progress.expeditionResults[this.stage.id] || 0, score);
+      this.save(this.progress);
+      this.ui.setProgress(this.progress);
+      this.ui.modal({ icon: this.stage.icon, eyebrow: "Expedition complete", title: this.stage.name, text,
+        stats: [[score, "score"], [this.progress.equipment.owned.length, "discoveries owned"], [this.progress.expeditionResults[this.stage.id], "best"]], actions: [
+          { label: "More expeditions", run: () => { this.stop(); this.ui.showExpeditions(); } },
+          { label: "Workshop", run: () => { this.stop(); this.ui.showWorkshop(); } },
+          { label: "Replay", run: () => this.begin(this.item) },
+        ] });
+      return;
+    }
     if (won && this.stage.type === "brawl") {
       const allies = this.entities.filter(e => e.kind === "ally").length;
       const score = this.combat.kills * 100 + allies * 200 + this.shields * 50 + Math.max(0, Math.floor(this.time)) * 10;
@@ -767,7 +804,7 @@ export class Game {
     } else {
       this.ui.modal({ icon: "↻", eyebrow: "Mission incomplete", title: "The beach needs another try", text, stats: [[this.progressText(), "progress"], [this.shields, "shield"]], actions: [
         { label: "Try again", run: () => this.begin(this.item) },
-        { label: "Mission map", run: () => { this.stop(); this.ui.showMap(); } },
+        { label: this.expedition ? "Expeditions" : "Mission map", run: () => { this.stop(); this.expedition ? this.ui.showExpeditions() : this.ui.showMap(); } },
       ] });
     }
   }

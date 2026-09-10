@@ -157,7 +157,41 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
 .touch-actions button[data-touch="pulse"]::after, .touch-actions button[data-touch="dash"]::after { content: ""; position: absolute; left: 15%; right: 15%; bottom: 12px; height: 3px; border-radius: 3px; background: linear-gradient(90deg, var(--cyan) var(--ready, 100%), rgba(255,255,255,.2) var(--ready, 100%)); }
 .touch-actions button:first-child { grid-row: 1 / 3; min-height: 126px; border-radius: 34px; border-color: var(--cyan); }
 
+.expedition-intro { max-width: 1320px; margin: 12px auto 24px; color: #d0e9ef; line-height: 1.6; }
+.expedition-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; max-width: 1320px; margin: auto; }
+.expedition-card { padding: 24px; border-radius: 28px; display: flex; flex-direction: column; border-top: 4px solid var(--stage-color); }
+.expedition-art { height: 150px; display: grid; place-items: center; font-size: 80px; border-radius: 20px; margin-bottom: 24px; background: radial-gradient(ellipse at 50% 80%, color-mix(in srgb, var(--stage-color) 50%, transparent), rgba(5,30,50,.4)); }
+.expedition-card h3 { font-size: 34px; line-height: 1.05; margin-bottom: 14px; }
+.expedition-card p:not(.eyebrow) { color: #c1dce9; line-height: 1.6; font-size: 14px; }
+.expedition-card .eyebrow { font-size: 10px; color: var(--stage-color); }
+.expedition-card > small { color: var(--stage-color); line-height: 1.5; margin-top: auto; }
+.expedition-score { font-size: 12px; color: #b5ead2; margin: 15px 0; }
+.workshop-screen { padding: 22px 30px; background: linear-gradient(90deg, rgba(4,28,46,.35), transparent 75%); }
+.workshop-panel { position: absolute; top: 112px; left: 30px; bottom: 25px; width: min(420px, 38vw); padding: 24px; border-radius: 25px; overflow-y: auto; }
+.workshop-panel h3 { font-size: 22px; margin: 20px 0 12px; }
+#workshopSummary { color: var(--gold); font-size: 13px; }
+.workshop-hint { color: #bcdce5; font-size: 12px; line-height: 1.5; }
+.paint-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.paint-choice { padding: 8px 8px 8px 34px; text-align: left; font-size: 11px; position: relative; }
+.paint-choice::before { content: ""; position: absolute; left: 10px; top: 15px; width: 16px; height: 16px; border-radius: 50%; background: var(--paint); border: 1px solid #fff; }
+[aria-pressed="true"] { border-color: var(--gold); background-color: rgba(255,209,102,.15); }
+.equipment-choices { display: grid; gap: 8px; }
+.equipment-choice { padding: 12px; text-align: left; display: grid; gap: 5px; }
+.equipment-choice strong { font-size: 14px; }
+.equipment-choice small { font-size: 10px; color: #bce5f0; }
+.equipment-choice span { font-size: 11px; color: var(--green); }
+.equipment-choice:disabled { opacity: .7; filter: none; }
+.equipment-choice:disabled span { color: #bbc7d5; }
+.preview-note { position: absolute; bottom: 25px; right: 30px; padding: 12px 18px; border-radius: 15px; font-size: 12px; }
+.minimap { position: absolute; top: 104px; right: 18px; padding: 6px; width: 172px; border-radius: 16px; overflow: hidden; }
+.minimap canvas { display: block; width: 100%; aspect-ratio: 1; border-radius: 11px; }
+.minimap small { display: block; text-align: center; font-size: 8px; margin-top: 5px; color: #d6f8ff; }
+.title-card { max-height: calc(100dvh - 28px); overflow-y: auto; }
+
 @media (max-width: 900px) {
+  .expedition-grid { grid-template-columns: 1fr; max-width: 620px; }
+  .expedition-art { height: 110px; font-size: 64px; }
+  .minimap { width: 124px; top: 160px; right: 12px; }
   .chapter-card { grid-template-columns: 1fr; padding-left: 88px; }
   .chapter-number { left: 20px; font-size: 76px; }
   .progress-card { top: 91px; }
@@ -167,6 +201,14 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
 }
 
 @media (max-width: 620px) {
+  .workshop-screen { padding: 9px; }
+  .workshop-panel { top: auto; bottom: 9px; left: 9px; width: calc(100% - 18px); max-height: 44dvh; padding: 16px; }
+  .workshop-screen .map-header { padding: 9px; gap: 8px; }
+  .workshop-screen .map-header h2 { font-size: 20px; }
+  .workshop-screen .map-header .eyebrow { font-size: 8px; }
+  .preview-note { top: auto; right: 9px; bottom: calc(44dvh + 18px); max-width: calc(100% - 18px); font-size: 9px; padding: 8px; }
+  .minimap { top: 202px; right: 9px; width: 100px; padding: 4px; border-radius: 12px; }
+  .minimap small { font-size: 6px; }
   .title-screen { align-items: end; padding: 12px; }
   .title-card { padding: 27px; border-radius: 28px; }
   .title-card h1 { font-size: 56px; }
@@ -184,15 +226,16 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
   .status-card { top: 9px; right: 9px; padding: 5px 5px 5px 9px; gap: 7px; }
   .status-card > span { display: block; font-size: 9px; letter-spacing: 0; }
   .status-card .icon-button { width: 42px; min-width: 42px; min-height: 42px; }
-  .progress-card { top: 67px; min-width: 126px; padding: 8px 12px; }
+  .progress-card { top: 70px; left: 9px; right: 9px; transform: none; min-width: 0; padding: 8px 12px; white-space: nowrap; }
+  .progress-card strong { font-size: 14px; }
   .message { top: 112px; }
   .combat-active .combat-panel { left: 9px; top: 112px; padding: 9px 12px; width: calc(100% - 18px); max-width: none; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
   .combat-panel strong { font-size: 14px; }
   .combat-panel span { font-size: 10px; }
   .combat-panel small { font-size: 10px; }
   .combat-panel small:last-child { grid-column: 1 / -1; }
-  .combat-active .message { top: 208px; }
-  #app:has(.hud.combat-active:not(.hidden)) .dialogue { top: 264px; }
+  .combat-active .message { top: 208px; left: 9px; transform: none; max-width: calc(100% - 124px); font-size: 11px; padding: 9px; }
+  #app:has(.hud.combat-active:not(.hidden)) .dialogue { top: 335px; }
   .touch-controls.combat-active .touch-actions { right: 10px; grid-template-columns: repeat(3, 54px); }
   .touch-controls.combat-active .joystick { left: 10px; width: 94px; height: 94px; }
   .touch-controls.combat-active .joystick i { left: 25px; top: 25px; }
@@ -213,6 +256,10 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
 }
 
 @media (max-height: 500px) and (orientation: landscape) {
+  .minimap { top: 87px; right: 12px; width: 98px; }
+  .workshop-screen { padding: 9px 16px; }
+  .workshop-panel { top: 91px; left: 16px; bottom: 9px; width: 42vw; padding: 14px; }
+  .preview-note { bottom: 10px; right: 15px; max-width: 45vw; font-size: 10px; }
   .title-screen { align-items: center; padding: 10px 32px; }
   .title-card { padding: 20px 26px; width: 460px; }
   .title-card h1 { font-size: 52px; margin-bottom: 7px; }
@@ -236,7 +283,7 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
   .touch-actions button { min-height: 48px; }
   .touch-actions button:first-child { min-height: 105px; }
   .combat-panel { top: 88px; left: 12px; max-width: 285px; padding: 9px 12px; gap: 4px; }
-  #app:has(.hud.combat-active:not(.hidden)) .dialogue { left: auto; right: 12px; top: 85px; width: 285px; }
+  #app:has(.hud.combat-active:not(.hidden)) .dialogue { left: auto; right: 124px; top: 150px; width: 265px; }
   .touch-controls.combat-active .touch-actions button { min-height: 48px; }
   .combat-active .abilities { display: none; }
   .combat-active .navigation { bottom: 16px; max-width: 340px; }

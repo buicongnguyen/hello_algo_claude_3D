@@ -1,11 +1,15 @@
 import { CHAPTERS, TOTAL_STAGES } from "./missions.js";
 import { earnedUpgrades, isUnlocked, stageKey } from "./rules.js";
+import { EXPEDITIONS } from "./expedition-data.js";
+import { EQUIPMENT, PAINTS } from "./equipment.js";
+import { Minimap } from "./minimap.js";
 
 export class UI {
   constructor(progress, callbacks) {
     this.progress = progress;
     this.callbacks = callbacks;
-    this.screens = ["loading", "titleScreen", "mapScreen", "briefing"];
+    this.screens = ["loading", "titleScreen", "mapScreen", "briefing", "expeditionScreen", "workshopScreen"];
+    this.minimap = new Minimap(document.querySelector("#minimap"));
     this.hud = document.querySelector("#hud");
     this.touch = document.querySelector("#touchControls");
     this.cache = {};
@@ -17,6 +21,11 @@ export class UI {
   }
 
   bind() {
+    document.querySelector("#expeditionsButton").addEventListener("click", () => this.showExpeditions());
+    document.querySelector("#workshopButton").addEventListener("click", () => this.showWorkshop());
+    document.querySelector("#expeditionWorkshop").addEventListener("click", () => this.showWorkshop());
+    document.querySelector("#workshopPlay").addEventListener("click", () => this.showExpeditions());
+    document.querySelector("#briefBack").addEventListener("click", () => this.selected?.stage.type === "expedition" ? this.showExpeditions() : this.showMap());
     document.querySelector("#continueButton").addEventListener("click", () => this.callbacks.continue());
     document.querySelector("#brawlButton").addEventListener("click", () => this.callbacks.brawl());
     document.querySelector("#missionsButton").addEventListener("click", () => this.showMap());
@@ -49,6 +58,7 @@ export class UI {
 
   showOnly(id) {
     this.hideDialogue();
+    if (id !== "workshopScreen") this.callbacks.preview?.(false);
     this.screens.forEach(screen => document.querySelector(`#${screen}`).classList.toggle("hidden", screen !== id));
     this.hud.classList.add("hidden");
     this.touch.classList.add("hidden");
@@ -58,6 +68,45 @@ export class UI {
   showTitle() {
     this.showOnly("titleScreen");
     this.updateCampaign();
+  }
+
+  showExpeditions() {
+    this.showOnly("expeditionScreen");
+    document.querySelector("#expeditionCards").replaceChildren(...EXPEDITIONS.map(item => {
+      const stage = item.stage, best = this.progress.expeditionResults[stage.id];
+      const card = document.createElement("article"); card.className = "expedition-card glass";
+      card.style.setProperty("--stage-color", stage.color);
+      card.innerHTML = `<div class="expedition-art" aria-hidden="true">${stage.icon}</div><p class="eyebrow">${stage.difficulty}</p><h3>${stage.name}</h3><p>${stage.story}</p><small>Discover · ${stage.reward}</small><span class="expedition-score">${best != null ? `✓ Completed · best ${best}` : "New shore · ready to explore"}</span>`;
+      const play = document.createElement("button"); play.className = "primary"; play.textContent = `Play ${stage.name}`;
+      play.addEventListener("click", () => this.showBriefing(item)); card.append(play);
+      return card;
+    }));
+  }
+
+  showWorkshop() {
+    this.showOnly("workshopScreen");
+    this.renderWorkshop();
+  }
+
+  renderWorkshop() {
+    const equipment = this.progress.equipment;
+    document.querySelector("#workshopSummary").textContent = `${equipment.owned.length} / 6 discoveries · ${PAINTS[equipment.paint].name}`;
+    document.querySelector("#paintChoices").replaceChildren(...Object.entries(PAINTS).map(([id, paint]) => {
+      const button = document.createElement("button"); button.className = "paint-choice";
+      button.style.setProperty("--paint", `#${paint.shell.toString(16).padStart(6, "0")}`);
+      button.textContent = paint.name; button.setAttribute("aria-pressed", String(equipment.paint === id));
+      button.addEventListener("click", () => { this.callbacks.paint(id); this.renderWorkshop(); });
+      return button;
+    }));
+    document.querySelector("#equipmentChoices").replaceChildren(...Object.entries(EQUIPMENT).map(([id, data]) => {
+      const owned = equipment.owned.includes(id), selected = equipment.equipped[data.slot] === id;
+      const button = document.createElement("button"); button.className = "equipment-choice";
+      button.disabled = !owned; button.setAttribute("aria-pressed", String(selected));
+      button.innerHTML = `<strong>${selected ? "✓ " : ""}${data.name}</strong><small>${data.slot.toUpperCase()} · ${data.description}</small><span>${!owned ? `Find in ${data.found}` : selected ? "Equipped · click to remove" : "Click to equip"}</span>`;
+      button.addEventListener("click", () => { this.callbacks.equip(id, selected); this.renderWorkshop(); });
+      return button;
+    }));
+    this.callbacks.preview?.(true);
   }
 
   updateCampaign() {
@@ -96,18 +145,18 @@ export class UI {
     this.selected = item;
     this.showOnly("briefing");
     document.querySelector("#briefIcon").textContent = item.chapter.icon;
-    document.querySelector("#briefChapter").textContent = item.stage.type === "brawl" ? "Arcade · 3 waves · available now" : `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`;
+    document.querySelector("#briefChapter").textContent = item.stage.type === "expedition" ? `Expedition ${item.stageIndex + 1} · ${item.stage.difficulty}` : item.stage.type === "brawl" ? "Arcade · 3 waves · available now" : `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`;
     document.querySelector("#briefTitle").textContent = item.stage.name;
     document.querySelector("#briefStory").textContent = item.stage.story;
     document.querySelector("#briefObjective").textContent = item.stage.objective;
-    document.querySelector("#briefReward").textContent = item.stage.type === "brawl" ? "Weapons · Freeze Pops · Crab crew · Repaired teammates" : item.stageIndex === 2 ? `Chapter reward · ${item.chapter.reward}` : `Next · ${item.chapter.stages[item.stageIndex + 1]?.name || item.chapter.reward}`;
+    document.querySelector("#briefReward").textContent = item.stage.type === "expedition" ? `Discover · ${item.stage.reward}` : item.stage.type === "brawl" ? "Weapons · Freeze Pops · Crab crew · Repaired teammates" : item.stageIndex === 2 ? `Chapter reward · ${item.chapter.reward}` : `Next · ${item.chapter.stages[item.stageIndex + 1]?.name || item.chapter.reward}`;
   }
 
   showGame(item) {
     this.screens.forEach(screen => document.querySelector(`#${screen}`).classList.add("hidden"));
     this.hud.classList.remove("hidden");
     this.touch.classList.toggle("hidden", !matchMedia("(pointer: coarse)").matches);
-    this.write("hudChapter", item.stage.type === "brawl" ? "Beach Brawl · survive the party" : `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`);
+    this.write("hudChapter", item.stage.type === "expedition" ? `Expedition ${item.stageIndex + 1} · ${item.stage.theme}` : item.stage.type === "brawl" ? "Beach Brawl · survive the party" : `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`);
     this.write("hudTitle", item.stage.name);
     this.write("hudObjective", item.stage.objective);
   }

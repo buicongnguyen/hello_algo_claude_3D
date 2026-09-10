@@ -1,4 +1,5 @@
 import { ALL_STAGES, CHAPTERS } from "./missions.js";
+import { normalizeEquipment } from "./equipment.js";
 
 export const SAVE_VERSION = 1;
 
@@ -11,6 +12,8 @@ export function createProgress(raw = {}) {
   return {
     version: SAVE_VERSION,
     brawlBest: Number.isFinite(raw.brawlBest) ? Math.max(0, raw.brawlBest) : 0,
+    equipment: normalizeEquipment(raw.equipment),
+    expeditionResults: Object.fromEntries(["coral", "scrapyard", "moonpool"].filter(id => Number.isFinite(raw.expeditionResults?.[id]) && raw.expeditionResults[id] >= 0).map(id => [id, raw.expeditionResults[id]])),
     completed: Array.isArray(raw.completed) ? [...new Set(raw.completed.filter(value => typeof value === "string"))] : [],
     results: raw.results && typeof raw.results === "object" ? { ...raw.results } : {},
     settings: { quality: "auto", reducedMotion: false, ...(raw.settings || {}) },

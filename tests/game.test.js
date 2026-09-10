@@ -5,15 +5,18 @@ import { Game } from "../src/game.js";
 import { World } from "../src/world.js";
 import { ALL_STAGES, BRAWL, findStage } from "../src/missions.js";
 import { createProgress, earnedUpgrades, recordResult } from "../src/rules.js";
+import { EXPEDITIONS } from "../src/expedition-data.js";
+import { EQUIPMENT, equipItem, normalizeEquipment, equipmentStats } from "../src/equipment.js";
+import { mapMarkers, mapPoint } from "../src/minimap.js";
 
 function harness(progress = createProgress()) {
   const mission = new THREE.Group();
   const world = {
     mission, cameraYaw: Math.PI / 6, launches: 0,
     clearMission: () => mission.clear(),
-    createActor: (_name, p) => {
+    createActor: (_name, p, _scale, parent = mission) => {
       const object = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial());
-      object.position.set(p.x, 0.55, p.z); mission.add(object); return object;
+      object.position.set(p.x, 0.55, p.z); parent.add(object); return object;
     },
     createMarker: () => { const group = new THREE.Group(); group.userData.ring = new THREE.Group(); mission.add(group); return group; },
     createRoute: () => { const line = new THREE.Group(); mission.add(line); return line; },
@@ -371,4 +374,175 @@ test("optional loot guidance never hides required campaign actions or wastes sho
   game.begin(ALL_STAGES.find(item => item.stage.type === "combat"));
   for (const enemy of game.combat.enemies()) defeat(game, enemy);
   assert.match(game.objectiveTarget().label, /Gold beacon/);
+});
+
+function clearExpeditionPatrols(game) {
+  for (let tick = 0; tick < 80 && !game.expedition.patrolsClear(); tick++) {
+    game.expedition.update(4);
+    for (const enemy of game.combat.enemies()) game.combat.hit(enemy, enemy.health);
+  }
+  assert.equal(game.expedition.patrolsClear(), true);
+  assert.equal(game.combat.kills, game.stage.patrols);
+}
+
+test("three expeditions have distinct, finite, reachable action paths", () => {
+  const { game, ui } = harness();
+  assert.equal(new Set(EXPEDITIONS.map(item => item.stage.mode)).size, 3);
+  for (const item of EXPEDITIONS) {
+    game.begin(item);
+    const e = game.expedition;
+    assert.equal(game.shields, 5);
+    move(game, e.exit); game.interact();
+    assert.equal(game.running, true, "exit cannot bypass the objective");
+    if (e.mode === "rescue") for (const friend of e.friends) {
+      move(game, friend); game.interact();
+      assert.equal(game.carry, friend);
+      move(game, e.sanctuary); game.interact();
+      assert.equal(game.carry, null);
+      assert.equal(friend.active, false);
+    }
+    if (e.mode === "salvage") for (const item of e.discoveries.filter(d => d.missionDisc)) {
+      move(game, item); e.update(0);
+      assert.equal(item.active, false);
+    }
+    clearExpeditionPatrols(game);
+    if (e.mode === "escort") for (let tick = 0; tick < 1000 && e.checkpoint < 3; tick++) {
+      move(game, e.snail); e.updateEscort(0.05);
+    }
+    assert.equal(e.taskComplete(), true);
+    move(game, e.exit); game.interact();
+    assert.equal(game.running, false);
+    assert.equal(ui.outcome.eyebrow, "Expedition complete");
+    assert.ok(game.progress.expeditionResults[item.stage.id] > 0);
+  }
+  assert.equal(game.progress.completed.length, 0);
+  assert.equal(game.progress.brawlBest, 0);
+});
+
+test("equipment migration rejects unknown, unowned and wrong-slot saved items", () => {
+  const equipment = normalizeEquipment({ owned: ["turbo", "turbo", "armor", "evil"], paint: "unknown", equipped: { software: "frost", body: "turbo", head: "antenna", back: "__proto__" } });
+  assert.deepEqual(equipment.owned, ["turbo", "armor"]);
+  assert.equal(equipment.paint, "lagoon");
+  assert.ok(Object.values(equipment.equipped).every(v => v === null));
+  assert.equal(equipItem(equipment, "frost"), false);
+  assert.equal(equipItem(equipment, "turbo"), true);
+  const restored = createProgress({ equipment, expeditionResults: { coral: 100, moonpool: -9, unknown: 10 }, completed: ["signal:wake"] });
+  assert.equal(restored.equipment.equipped.software, "turbo");
+  assert.deepEqual(restored.expeditionResults, { coral: 100 });
+  assert.equal(restored.completed[0], "signal:wake");
+});
+
+test("discs install one software choice, survive a failed run and cannot stack bonuses", () => {
+  const { game } = harness(); game.begin(EXPEDITIONS[1]);
+  const turbo = game.expedition.discoveries.find(d => d.id === "turbo");
+  game.expedition.collect(turbo);
+  const speed = game.player.speed;
+  assert.equal(speed, 6.3 * 1.12);
+  assert.equal(game.expedition.collect(turbo), false);
+  for (let i = 0; i < 10; i++) game.refreshEquipment(true);
+  assert.equal(game.player.speed, speed);
+  game.expedition.collect(game.expedition.discoveries.find(d => d.id === "overclock"));
+  assert.equal(game.player.speed, 6.3);
+  assert.equal(game.upgrades.fireRate, 0.82);
+  game.finish(false, "test retry");
+  const saved = createProgress(JSON.parse(JSON.stringify(game.progress)));
+  const resumed = harness(saved).game; resumed.begin(BRAWL);
+  assert.equal(resumed.upgrades.fireRate, 0.82);
+  assert.deepEqual(resumed.progress.equipment.owned, ["turbo", "overclock"]);
+  assert.equal(resumed.progress.completed.length, 0);
+});
+
+test("physical parts attach once, preserve lost shields and persist across missions", () => {
+  const { game } = harness(); game.begin(EXPEDITIONS[0]);
+  game.shields = 3;
+  game.expedition.collect(game.expedition.discoveries.find(d => d.id === "armor"));
+  assert.equal(game.upgrades.maxShields, 6);
+  assert.equal(game.shields, 4);
+  for (let i = 0; i < 5; i++) game.refreshEquipment(true);
+  assert.equal(game.shields, 4, "re-equipping cannot manufacture shield refills");
+  for (const id of ["thrusters", "antenna"]) { game.progress.equipment.owned.push(id); equipItem(game.progress.equipment, id); }
+  game.refreshEquipment(true);
+  assert.equal(game.player.object.userData.attachments.length, 3);
+  assert.equal(game.player.object.children.filter(c => c.userData.equipmentSlot).length, 3);
+  assert.equal(game.upgrades.dashRecharge, 2);
+  assert.equal(game.upgrades.pulseRadius, 3.95);
+  game.begin(findStage("wake"));
+  assert.equal(game.shields, 4);
+  assert.equal(game.player.object.userData.attachments.length, 3);
+});
+
+test("Frost OS grants one starting charge and weapon software changes real cooldown", () => {
+  const progress = createProgress({ equipment: { owned: ["frost", "overclock"], equipped: { software: "frost" } } });
+  const { game } = harness(progress); game.begin(BRAWL);
+  assert.equal(game.combat.freezeCharges, 1);
+  game.refreshEquipment(true);
+  assert.equal(game.combat.freezeCharges, 1);
+  equipItem(game.progress.equipment, "overclock"); game.refreshEquipment(true);
+  game.combat.collect(game.combat.pickups.find(p => p.type === "bubble"));
+  const target = game.spawnEnemy(false, 0); target.x = game.player.x + 4; target.z = game.player.z;
+  game.combat.shoot();
+  assert.equal(game.combat.cooldown, 0.24 * 0.82);
+  assert.equal(equipmentStats(earnedUpgrades(progress), progress.equipment).fireRate, 0.82);
+});
+
+test("NORI waits for the player and blocking enemies instead of failing off screen", () => {
+  const { game } = harness(); game.begin(EXPEDITIONS[2]);
+  const e = game.expedition, before = { x: e.snail.x, z: e.snail.z };
+  move(game, { x: 17, z: 0 }); e.updateEscort(1);
+  assert.equal(e.escortState, "waiting for you");
+  assert.deepEqual({ x: e.snail.x, z: e.snail.z }, before);
+  const enemy = game.spawnEnemy(false, 0); enemy.x = e.snail.x; enemy.z = e.snail.z;
+  move(game, e.snail); e.updateEscort(1);
+  assert.equal(e.escortState, "clear nearby bots");
+  game.combat.hit(enemy, enemy.health); e.updateEscort(1);
+  assert.equal(e.escortState, "parading");
+  assert.ok(Math.hypot(e.snail.x - before.x, e.snail.z - before.z) > 1);
+});
+
+test("clam healing has a cooldown and octopus ink slows hostiles", () => {
+  const { game } = harness(); game.begin(EXPEDITIONS[0]);
+  const e = game.expedition;
+  move(game, e.clam); game.interact();
+  assert.equal(e.clamCooldown, 0);
+  game.shields = 2; game.interact();
+  assert.equal(game.shields, 3); assert.equal(e.clamCooldown, 16);
+  game.interact(); assert.equal(game.shields, 3);
+  const enemy = game.spawnEnemy(false, 0);
+  enemy.x = e.helper.x + 1; enemy.z = e.helper.z;
+  e.update(0.05);
+  assert.equal(enemy.inkSlow, 4);
+  const before = enemy.x;
+  game.combat.moveEnemy(enemy, { x: enemy.x + 10, z: enemy.z }, 1);
+  assert.ok(enemy.x - before < enemy.speed, "ink must reduce real movement, not just display a cue");
+});
+
+test("minimap matches camera controls and excludes collected loot and defeated enemies", () => {
+  const { game } = harness(); game.begin(EXPEDITIONS[0]);
+  const yaw = game.world.cameraYaw;
+  const forward = mapPoint({ x: -Math.sin(yaw), z: -Math.cos(yaw) }, yaw);
+  assert.ok(Math.abs(forward.x - 80) < 0.001 && forward.y < 80);
+  const e = game.spawnEnemy(false, 0);
+  assert.ok(mapMarkers(game, e).some(m => m.type === "enemy"));
+  game.combat.hit(e, e.health);
+  const disc = game.expedition.discoveries[0]; game.expedition.collect(disc);
+  const markers = mapMarkers(game, game.objectiveTarget());
+  assert.ok(!markers.some(m => m.type === "enemy"));
+  assert.ok(!markers.some(m => m.type === "loot" && m.id === disc.id));
+  assert.equal(markers.filter(m => m.type === "player").length, 1);
+  assert.equal(markers.filter(m => m.type === "target").length, 1);
+});
+
+test("expedition pause and failure return to expeditions, and deadline wins over exit input", () => {
+  const { game, ui, input } = harness(); game.begin(EXPEDITIONS[0]);
+  game.pause();
+  assert.equal(ui.outcome.actions.at(-1).label, "Expeditions");
+  const remaining = game.time; game.update(1);
+  assert.equal(game.time, remaining);
+  ui.outcome.actions[0].run();
+  game.expedition.rescued = 3; game.expedition.spawned = game.stage.patrols;
+  move(game, game.expedition.exit); game.time = 0.01;
+  input.actions.add("interact"); game.update(0.05);
+  assert.equal(ui.outcome.eyebrow, "Mission incomplete");
+  assert.equal(ui.outcome.actions.at(-1).label, "Expeditions");
+  assert.equal(game.progress.expeditionResults.coral, undefined);
 });

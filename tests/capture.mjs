@@ -71,6 +71,39 @@ try {
   await mobile.screenshot({ path: join(OUT, "08-brawl-portrait.png") });
   await mobile.setViewportSize({ width: 844, height: 390 });
   await mobile.screenshot({ path: join(OUT, "09-brawl-landscape.png") });
+  await page.evaluate(() => { const api = window.__ROBOT_BEACH__; api.game.stop(); api.ui.showExpeditions(); });
+  await page.screenshot({ path: join(OUT, "10-expeditions.png"), fullPage: true });
+  for (let i = 0; i < 3; i++) {
+    await page.evaluate(index => {
+      const api = window.__ROBOT_BEACH__;
+      api.game.begin(api.expeditions[index]);
+      for (const item of api.game.expedition.discoveries) api.game.expedition.collect(item);
+      api.game.combat.collect(api.game.combat.pickups.find(p => p.type === "bubble"));
+      api.game.player.x = 0; api.game.player.z = 7; api.game.player.object.position.set(0, 0.55, 7);
+      api.ui.hideDialogue();
+    }, i);
+    await page.waitForTimeout(1400);
+    await page.screenshot({ path: join(OUT, `11-expedition-${i}.png`) });
+  }
+  await page.evaluate(() => { const api = window.__ROBOT_BEACH__; api.game.stop(); api.ui.showWorkshop(); });
+  await page.getByRole("button", { name: "Candy pink", exact: true }).click();
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: join(OUT, "12-workshop.png") });
+  await mobile.setViewportSize({ width: 390, height: 844 });
+  await mobile.evaluate(() => {
+    const api = window.__ROBOT_BEACH__; api.game.begin(api.expeditions[0]);
+    for (const item of api.game.expedition.discoveries) api.game.expedition.collect(item);
+    api.ui.hideDialogue();
+  });
+  await mobile.waitForTimeout(1200);
+  await mobile.screenshot({ path: join(OUT, "13-expedition-portrait.png") });
+  await mobile.evaluate(() => { const api = window.__ROBOT_BEACH__; api.game.stop(); api.ui.showWorkshop(); });
+  await mobile.waitForTimeout(1200);
+  await mobile.screenshot({ path: join(OUT, "14-workshop-portrait.png") });
+  await mobile.setViewportSize({ width: 844, height: 390 });
+  await mobile.evaluate(() => { const api = window.__ROBOT_BEACH__; api.game.begin(api.expeditions[2]); api.ui.hideDialogue(); });
+  await mobile.waitForTimeout(1000);
+  await mobile.screenshot({ path: join(OUT, "15-expedition-landscape.png") });
   console.log(`Visual captures written to ${OUT}`);
 } finally {
   if (browser) await browser.close();

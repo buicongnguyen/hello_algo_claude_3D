@@ -17,7 +17,7 @@ const LOOT = {
 export class Combat {
   constructor(game) {
     this.game = game;
-    this.enabled = ["combat", "defense", "boss", "finale", "brawl"].includes(game.stage.type) || Boolean(game.stage.enemies);
+    this.enabled = ["combat", "defense", "boss", "finale", "brawl", "expedition"].includes(game.stage.type) || Boolean(game.stage.enemies);
     this.weapon = null;
     this.ammo = 0;
     this.cooldown = 0;
@@ -134,7 +134,7 @@ export class Combat {
     const weapon = WEAPONS[this.weapon];
     const target = this.nearest(this.game.player, weapon.range, this.enemies().filter(e => !e.boss || e.state === "exposed"));
     if (!target) return false; // Holding Fire never wastes ammunition on empty sky.
-    this.cooldown = weapon.cooldown; this.ammo--;
+    this.cooldown = weapon.cooldown * (this.game.upgrades.fireRate || 1); this.ammo--;
     this.game.player.object.rotation.y = Math.atan2(target.x - this.game.player.x, target.z - this.game.player.z);
     if (this.weapon === "arc") {
       const chain = [target];
@@ -208,6 +208,7 @@ export class Combat {
 
   moveEnemy(enemy, target, dt) {
     const g = this.game;
+    if (enemy.inkSlow > 0) { enemy.inkSlow = Math.max(0, enemy.inkSlow - dt); dt *= 0.4; }
     const d = distance(enemy, target) || 1;
     let moving = false;
     const approach = () => {
@@ -375,7 +376,7 @@ export class Combat {
     if (!this.enabled) return null;
     // Optional equipment must not hide a required build, delivery or launch action.
     if (["prepare", "ready", "launch", "celebrate"].includes(this.game.phase) || this.game.goal && !this.game.goal.locked) return null;
-    if (this.game.stage.type !== "brawl" && !this.enemies().length) return null;
+    if (!["brawl", "expedition"].includes(this.game.stage.type) && !this.enemies().length) return null;
     if (!this.weapon || this.ammo <= 0) {
       const item = this.nearest(this.game.player, Infinity, this.pickups.filter(p => p.active && WEAPONS[p.type]));
       if (item) return { ...item, label: `Walk over ${WEAPONS[item.type].name}` };

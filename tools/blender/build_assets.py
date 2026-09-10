@@ -39,6 +39,10 @@ GREEN = material("Shelter Green", (0.08, 0.62, 0.34), 0.15, 0.45)
 RED = material("Lighthouse Red", (0.82, 0.08, 0.06), 0.35, 0.36)
 BROWN = material("Palm Trunk", (0.40, 0.18, 0.07), 0.0, 0.85)
 LEAF = material("Palm Leaf", (0.05, 0.48, 0.22), 0.0, 0.72)
+PINK = material("Reef Pink", (1.0, 0.22, 0.58), 0.1, 0.45)
+PURPLE = material("Orchid Violet", (0.43, 0.16, 0.82), 0.25, 0.35)
+MINT = material("Sea Mint", (0.12, 0.88, 0.68), 0.15, 0.35)
+PEARL = material("Pearl Glow", (1.0, 0.78, 0.9), 0.45, 0.2, (0.4, 0.12, 0.32))
 
 
 def set_mat(obj, mat):
@@ -227,6 +231,154 @@ def palm():
     return r
 
 
+def torus(name, loc, major, minor, mat, parent, rotation=(0, 0, 0)):
+    bpy.ops.mesh.primitive_torus_add(major_radius=major, minor_radius=minor, major_segments=20, minor_segments=6, location=loc, rotation=rotation)
+    obj = bpy.context.object
+    obj.name = name
+    set_mat(obj, mat)
+    obj.parent = parent
+    return obj
+
+
+def octopus():
+    r = root("Octopus_Friend")
+    sphere("Mantle", (0, 0, 0.72), (0.62, 0.56, 0.7), PURPLE, r)
+    for x in (-0.22, 0.22):
+        sphere("EyeWhite", (x, -0.5, 0.83), (0.14, 0.1, 0.18), WHITE, r)
+        sphere("Eye", (x, -0.59, 0.84), (0.07, 0.045, 0.09), NAVY, r)
+    for i in range(8):
+        angle = i * math.tau / 8
+        arm = root(f"Tentacle_{i}")
+        arm.parent = r
+        arm.rotation_euler.z = angle
+        for j in range(3):
+            sphere("TentacleSegment", (0.42 + j * 0.28, 0, 0.18 - j * 0.02), (0.26, 0.15 - j * 0.028, 0.17 - j * 0.025), PINK if j == 2 else PURPLE, arm)
+    return r
+
+
+def starfish():
+    r = root("Starfish_Friend")
+    verts = [(0, 0, 0.34), (0, 0, 0.05)]
+    for i in range(10):
+        angle = i * math.pi / 5 + math.pi / 2
+        radius = 1.0 if i % 2 == 0 else 0.38
+        verts.append((math.cos(angle) * radius, math.sin(angle) * radius, 0.1))
+    faces = []
+    for i in range(10):
+        a, b = 2 + i, 2 + (i + 1) % 10
+        faces.extend([(0, a, b), (1, b, a)])
+    mesh = bpy.data.meshes.new("FivePointStar")
+    mesh.from_pydata(verts, [], faces)
+    obj = bpy.data.objects.new("StarBody", mesh)
+    bpy.context.collection.objects.link(obj)
+    obj.parent = r
+    set_mat(obj, GOLD)
+    for x in (-0.16, 0.16):
+        sphere("StarEye", (x, -0.12, 0.33), (0.065, 0.065, 0.06), NAVY, r)
+    return r
+
+
+def snail():
+    r = root("NORI_Snail")
+    sphere("SoftBody", (0, -0.1, 0.25), (0.44, 0.95, 0.22), MINT, r)
+    sphere("Shell", (0, 0.13, 0.76), (0.66, 0.62, 0.69), PINK, r)
+    for side in (-1, 1):
+        torus("ShellSpiral", (side * 0.58, 0.1, 0.79), 0.34, 0.07, GOLD, r, (0, math.pi / 2, 0))
+        cylinder("EyeStalk", (side * 0.22, -0.73, 0.62), 0.055, 0.64, MINT, r, 8)
+        sphere("SnailEye", (side * 0.22, -0.73, 0.99), (0.13, 0.13, 0.13), WHITE, r)
+        sphere("Pupil", (side * 0.22, -0.85, 1.0), (0.065, 0.04, 0.07), NAVY, r)
+    return r
+
+
+def clam():
+    r = root("Clam_Repair_Station")
+    sphere("LowerShell", (0, 0, 0.17), (0.85, 0.62, 0.24), PINK, r)
+    lid = root("ClamLid")
+    lid.parent = r
+    lid.location = (0, 0.45, 0.22)
+    lid.rotation_euler.x = math.radians(-38)
+    sphere("UpperShell", (0, -0.42, 0.1), (0.85, 0.62, 0.18), PURPLE, lid)
+    sphere("RepairPearl", (0, -0.12, 0.43), (0.3, 0.3, 0.3), PEARL, r)
+    for x in (-0.16, 0.16):
+        sphere("PearlEye", (x, -0.38, 0.48), (0.055, 0.045, 0.06), NAVY, r)
+    return r
+
+
+def coral_cluster():
+    r = root("Coral_Cluster")
+    sphere("CoralRock", (0, 0, 0.13), (1.05, 0.7, 0.28), PURPLE, r)
+    for i, (x, y, h) in enumerate([(-0.55, 0, 1.4), (0, 0.2, 2.0), (0.55, -0.1, 1.1)]):
+        cylinder("CoralStem", (x, y, h / 2), 0.13, h, PINK, r, 8)
+        sphere("CoralTip", (x, y, h), (0.2, 0.2, 0.22), PEARL, r)
+        for side in (-1, 1):
+            cylinder("CoralBranch", (x + side * 0.22, y, h * 0.68), 0.09, 0.68, PINK, r, 8, (0, side * 0.7, 0))
+    return r
+
+
+def reef_arch():
+    r = root("Reef_Arch")
+    for x in (-1.4, 1.4):
+        cylinder("ArchColumn", (x, 0, 1.15), 0.32, 2.3, MINT, r, 8)
+        sphere("PearlCap", (x, 0, 2.4), (0.4, 0.4, 0.36), PEARL, r)
+    cube("ArchBridge", (0, 0, 2.7), (1.7, 0.28, 0.24), PURPLE, 0.2, r)
+    torus("ArchHalo", (0, -0.04, 2.7), 0.52, 0.12, GOLD, r, (math.pi / 2, 0, 0))
+    return r
+
+
+def salvage_tower():
+    r = root("Neon_Salvage_Tower")
+    for i in range(3):
+        cube("SalvageCrate", (i % 2 * 0.15, 0, 0.4 + i * 0.68), (0.7 - i * 0.12, 0.55, 0.32), PURPLE if i % 2 else NAVY, 0.08, r)
+        cube("NeonStrip", (0, -0.57, 0.4 + i * 0.68), (0.52 - i * 0.08, 0.045, 0.055), CYAN if i % 2 else PINK, 0.02, r)
+    torus("ScrapWheel", (0.9, 0, 0.5), 0.44, 0.16, GOLD, r, (math.pi / 2, 0, 0))
+    return r
+
+
+def moon_mushroom():
+    r = root("Moon_Mushrooms")
+    for x, y, h in [(-0.45, 0, 1.4), (0.48, 0.2, 2.2), (0.12, -0.45, 0.75)]:
+        cylinder("GlowStem", (x, y, h / 2), 0.13, h, PEARL, r, 8)
+        sphere("GlowCap", (x, y, h), (0.68, 0.6, 0.28), MINT if h > 1 else PINK, r)
+        sphere("CapDot", (x, y, h + 0.25), (0.18, 0.16, 0.045), GOLD, r)
+    return r
+
+
+def software_disc():
+    r = root("Software_CD")
+    torus("Disc", (0, 0, 0.65), 0.5, 0.17, WHITE, r, (math.pi / 2, 0, 0))
+    for i, mat in enumerate([PINK, CYAN, GOLD, MINT, PURPLE]):
+        angle = i * math.tau / 5
+        sphere("DataBit", (math.cos(angle) * 0.48, -0.14, 0.65 + math.sin(angle) * 0.48), (0.14, 0.06, 0.14), mat, r)
+    return r
+
+
+def prism_armor():
+    r = root("Prism_Armor")
+    cube("ChestPlate", (0, -0.37, 1.34), (0.53, 0.09, 0.38), PURPLE, 0.12, r)
+    sphere("ChestGem", (0, -0.49, 1.43), (0.23, 0.10, 0.25), GOLD, r)
+    for side in (-1, 1):
+        sphere("PrismShoulder", (side * 0.62, 0, 1.75), (0.29, 0.34, 0.2), PINK, r)
+    return r
+
+
+def twin_thrusters():
+    r = root("Twin_Thrusters")
+    cube("Backpack", (0, 0.39, 1.4), (0.44, 0.22, 0.38), NAVY, 0.08, r)
+    for side in (-1, 1):
+        cylinder("ThrusterTank", (side * 0.35, 0.55, 1.42), 0.2, 0.95, GOLD, r, 12)
+        cone("ThrusterGlow", (side * 0.35, 0.55, 0.79), 0.03, 0.16, 0.4, CYAN, r, 8)
+    return r
+
+
+def halo_antenna():
+    r = root("Halo_Antenna")
+    torus("Halo", (0, 0, 2.96), 0.54, 0.095, PINK, r)
+    for side in (-1, 1):
+        cylinder("HaloSupport", (side * 0.35, 0, 2.68), 0.045, 0.5, GOLD, r, 8)
+    sphere("HaloStar", (0, 0, 3.05), (0.14, 0.14, 0.14), CYAN, r)
+    return r
+
+
 builders = {
     "kai": lambda: robot(),
     "bolt": dog,
@@ -240,6 +392,18 @@ builders = {
     "crab": crab,
     "beacon": beacon,
     "palm": palm,
+    "octopus": octopus,
+    "starfish": starfish,
+    "snail": snail,
+    "clam": clam,
+    "coral_cluster": coral_cluster,
+    "reef_arch": reef_arch,
+    "salvage_tower": salvage_tower,
+    "moon_mushroom": moon_mushroom,
+    "software_disc": software_disc,
+    "prism_armor": prism_armor,
+    "twin_thrusters": twin_thrusters,
+    "halo_antenna": halo_antenna,
 }
 
 roots = {}
