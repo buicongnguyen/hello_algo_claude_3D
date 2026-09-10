@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#062b47" />
+    <meta name="description" content="Robot Beach 3D: Signalbreak — a friendly Three.js action adventure." />
+    <title>Robot Beach 3D: Signalbreak</title>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="game" aria-label="Robot Beach 3D game world"></canvas>
+
+      <section id="loading" class="screen loading-screen" aria-live="polite">
+        <div class="brand-mark">RB<span>3D</span></div>
+        <p class="eyebrow">Preparing the island</p>
+        <h1>Signalbreak</h1>
+        <div class="load-track"><span id="loadBar"></span></div>
+        <p id="loadStatus">Starting Three.js…</p>
+      </section>
+
+      <section id="titleScreen" class="screen title-screen hidden" aria-labelledby="gameTitle">
+        <div class="title-card glass">
+          <p class="eyebrow">A Robot Beach story</p>
+          <h1 id="gameTitle"><span>Signal</span>break</h1>
+          <p class="tagline">Recover the Aurora fragments. Rescue the shore. Relight the sky.</p>
+          <div class="button-stack">
+            <button id="continueButton" class="primary">Begin journey</button>
+            <button id="missionsButton">Mission map</button>
+            <button id="howButton" class="quiet">How to play</button>
+          </div>
+          <div class="campaign-progress"><span id="campaignCount">0 / 15</span><div><i id="campaignBar"></i></div></div>
+        </div>
+        <p class="corner-note">Blender-crafted world · Three.js runtime</p>
+      </section>
+
+      <section id="mapScreen" class="screen map-screen hidden" aria-labelledby="mapTitle">
+        <header class="map-header glass">
+          <button class="icon-button" data-screen="title" aria-label="Back to title">←</button>
+          <div><p class="eyebrow">Aurora recovery route</p><h2 id="mapTitle">Mission map</h2></div>
+          <button id="resetButton" class="quiet small">Reset</button>
+        </header>
+        <div id="chapterRail" class="chapter-rail"></div>
+      </section>
+
+      <section id="briefing" class="screen briefing-screen hidden" aria-labelledby="briefTitle">
+        <div class="brief-card glass">
+          <div id="briefIcon" class="brief-icon">⚡</div>
+          <p id="briefChapter" class="eyebrow"></p>
+          <h2 id="briefTitle"></h2>
+          <p id="briefStory" class="story-line"></p>
+          <div class="objective-box"><span>Objective</span><strong id="briefObjective"></strong></div>
+          <div id="briefReward" class="reward-line"></div>
+          <div class="button-row">
+            <button id="launchButton" class="primary">Enter mission</button>
+            <button data-screen="map">Back</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="hud" class="hud hidden" aria-label="Mission information">
+        <div class="mission-card glass"><p id="hudChapter" class="eyebrow"></p><strong id="hudTitle"></strong><span id="hudObjective"></span></div>
+        <div class="progress-card glass"><span id="hudProgressIcon">⚡</span><strong id="hudProgress">0 / 3</strong></div>
+        <div class="status-card glass"><span id="hudShield">◆◆</span><div><small>TIME</small><strong id="hudTime">60</strong></div><button id="pauseButton" class="icon-button" aria-label="Pause">Ⅱ</button></div>
+        <div id="prompt" class="world-prompt hidden">E · INTERACT</div>
+        <div id="message" class="message hidden" role="status"></div>
+        <div class="abilities glass"><div><kbd>Q</kbd><span>Pulse</span><i id="pulseMeter"></i></div><div><kbd>Shift</kbd><span>Dash</span><i id="dashMeter"></i></div><div><kbd>E</kbd><span>Interact</span></div></div>
+        <div class="crosshair" aria-hidden="true"></div>
+      </section>
+
+      <section id="dialogue" class="dialogue glass hidden" aria-live="polite">
+        <div id="speakerPortrait" class="portrait">🤖</div><div><strong id="speakerName">LUMA</strong><p id="dialogueText"></p></div><button id="skipDialogue" class="quiet small">Skip</button>
+      </section>
+
+      <section id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal-card glass"><div id="modalIcon" class="modal-icon">⏸</div><p id="modalEyebrow" class="eyebrow"></p><h2 id="modalTitle"></h2><p id="modalText"></p><div id="modalStats" class="stat-grid"></div><div id="modalActions" class="button-row"></div></div>
+      </section>
+
+      <section id="helpPanel" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+        <div class="modal-card glass help-card"><p class="eyebrow">Field manual</p><h2 id="helpTitle">One control language</h2><div class="help-grid"><p><kbd>WASD</kbd><strong>Move</strong><span>Camera-relative movement</span></p><p><kbd>Q</kbd><strong>Pulse</strong><span>Scan, activate and disable</span></p><p><kbd>Shift</kbd><strong>Dash</strong><span>Evade danger quickly</span></p><p><kbd>E</kbd><strong>Interact</strong><span>Repair, carry and place</span></p></div><label><input id="reducedMotion" type="checkbox" /> Reduced motion</label><label>Quality <select id="quality"><option value="auto">Auto</option><option value="low">Low</option><option value="high">High</option></select></label><button id="closeHelp" class="primary">Ready</button></div>
+      </section>
+
+      <div id="touchControls" class="touch-controls hidden" aria-label="Touch controls">
+        <div id="joystick" class="joystick"><i></i></div>
+        <div class="touch-actions"><button data-touch="pulse">Pulse</button><button data-touch="dash">Dash</button><button data-touch="interact">Use</button></div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

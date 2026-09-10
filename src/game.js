@@ -1,0 +1,648 @@
+import * as THREE from "three";
+import { applyHit, recordResult, sequenceStep } from "./rules.js";
+
+const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+export class Game {
+  constructor(world, input, ui, progress, save) {
+    this.world = world;
+    this.input = input;
+    this.ui = ui;
+    this.progress = progress;
+    this.save = save;
+    this.running = false;
+    this.paused = false;
+    this.entities = [];
+    this.effects = [];
+  }
+
+  begin(item) {
+    this.item = item;
+    this.stage = item.stage;
+    this.world.clearMission();
+    this.input.clear();
+    this.entities = [];
+    this.time = this.stage.time;
+    this.elapsed = 0;
+    this.progressCount = 0;
+    this.sequenceIndex = 0;
+    this.shields = 3;
+    this.invulnerable = 0;
+    this.pulseCooldown = 0;
+    this.dashCooldown = 0;
+    this.dashTime = 0;
+    this.carry = null;
+    this.goal = null;
+    this.shelter = null;
+    this.finalBeacon = null;
+    this.rocketGoal = null;
+    this.relay = null;
+    this.boss = null;
+    this.tide = null;
+    this.hazards = [];
+    this.turrets = [];
+    this.pads = [];
+    this.gates = [];
+    this.wrongActions = 0;
+    this.phase = "active";
+    this.spawned = 0;
+    this.escaped = 0;
+    this.spawnTimer = 1;
+    this.player = { x: 0, z: 13, speed: 6.3, radius: 0.9, object: this.world.createActor("kai", { x: 0, z: 13 }, 0.94) };
+    this.player.object.rotation.y = Math.PI;
+    this.setupMission();
+    this.ui.showGame(item);
+    this.running = true;
+    this.paused = false;
+    this.ui.dialogue(this.stage.dialogue);
+    this.ui.message("Mission started");
+  }
+
+  setupMission() {
+    const type = this.stage.type;
+    if (["collect", "race-collect"].includes(type)) this.setupCollect(type === "race-collect");
+    else if (type === "sequence") this.setupSequence();
+    else if (type === "combat") this.setupCombat();
+    else if (type === "rescue") this.setupRescue();
+    else if (type === "defense") this.setupDefense();
+    else if (type === "boss") this.setupBoss(false);
+    else if (type === "race") this.setupRace();
+    else if (type === "finale") this.setupFinale();
+  }
+
+  setupCollect(moving = false) {
+    const positions = this.stage.positions || this.routePositions(this.stage.count);
+    positions.forEach((position, index) => this.entities.push(this.makeEntity("cell", "energy_cell", position, 1.22, { id: index, moving, angle: index })));
+    if (this.stage.goal) {
+      this.goal = this.stage.id === "wake"
+        ? { kind: "goal", ...this.stage.goal, locked: true }
+        : this.makeEntity("goal", "beacon", this.stage.goal, 0.9, { locked: true });
+      this.goal.marker = this.world.createMarker(this.stage.goal, 0xffd166, 1.45);
+    }
+    if (this.stage.enemies) for (let index = 0; index < this.stage.enemies; index += 1) this.spawnEnemy(false, index);
+  }
+
+  setupSequence() {
+    this.expected = this.stage.positions.map((_, index) => index);
+    const colors = [0x65e5ff, 0xffd166, 0xbf8cff];
+    this.stage.positions.forEach((position, index) => {
+      const entity = this.makeEntity("node", "beacon", position, 0.82, { id: index, label: this.stage.labels[index] });
+      this.cloneMaterials(entity.object);
+      entity.marker = this.world.createMarker(position, colors[index], 1.35);
+      this.entities.push(entity);
+    });
+    this.world.createRoute(this.stage.positions, 0xffffff);
+  }
+
+  setupCombat() {
+    this.stage.positions.forEach((_, index) => this.spawnEnemy(false, index));
+    this.goal = this.makeEntity("goal", "beacon", this.stage.goal, 0.95, { locked: true });
+    this.goal.marker = this.world.createMarker(this.stage.goal, 0xffd166, 1.5);
+  }
+
+  setupRescue() {
+    this.stage.positions.forEach((position, index) => {
+      const creature = this.makeEntity("creature", "crab", position, 0.88 + (index % 2) * 0.08, { id: index });
+      creature.marker = this.world.createMarker(position, 0x65e5ff, 1.1);
+      this.entities.push(creature);
+    });
+    this.shelter = this.makeEntity("shelter", "beacon", this.stage.goal, 1.05, {});
+    this.shelter.marker = this.world.createMarker(this.stage.goal, 0x4cde8a, 2.0);
+    const tideMat = new THREE.MeshBasicMaterial({ color: 0x1e9fe0, transparent: true, opacity: 0.25, depthWrite: false, side: THREE.DoubleSide });
+    this.tide = new THREE.Mesh(new THREE.RingGeometry(12, 32, 64), tideMat);
+    this.tide.rotation.x = -Math.PI / 2;
+    this.tide.position.y = 0.61;
+    this.tide.scale.setScalar(1.7);
+    this.world.mission.add(this.tide);
+    if (this.stage.hazards) this.createHazards(3);
+    if (this.stage.finalBeacon) {
+      this.finalBeacon = this.makeEntity("final-beacon", "beacon", this.stage.finalBeacon, 0.92, { locked: true });
+      this.finalBeacon.marker = this.world.createMarker(this.stage.finalBeacon, 0xff7b4b, 1.45);
+    }
+  }
+
+  setupDefense() {
+    this.relay = this.makeEntity("relay", "beacon", { x: 0, z: -11 }, 1.1, {});
+    this.relay.marker = this.world.createMarker({ x: 0, z: -11 }, 0x65e5ff, 1.8);
+    const pads = [{ x: -7, z: -3 }, { x: 0, z: -3 }, { x: 7, z: -3 }];
+    this.pads = pads.slice(0, this.stage.pads).map((position, index) => ({ position, index, placed: false, marker: this.world.createMarker(position, 0xffd166, 1.55) }));
+    this.phase = "prepare";
+    this.ui.message(`Place ${this.stage.pads} solar turrets`);
+  }
+
+  setupBoss(finale) {
+    this.boss = this.spawnEnemy(true, 0, finale ? 20 : this.stage.health);
+    this.boss.x = 0;
+    this.boss.z = -8;
+    this.boss.object.position.set(0, 0.55, -8);
+    this.boss.state = "shielded";
+    this.boss.stateTime = 2.4;
+    this.boss.final = finale;
+  }
+
+  setupRace() {
+    this.gates = this.routePositions(this.stage.count).map((position, index) => {
+      const group = new THREE.Group();
+      const color = index === 0 ? 0xffd166 : 0x65e5ff;
+      const torus = new THREE.Mesh(new THREE.TorusGeometry(1.65, 0.13, 10, 36), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.6 }));
+      torus.rotation.x = Math.PI / 2;
+      torus.position.y = 0.85;
+      group.add(torus);
+      group.position.set(position.x, 0, position.z);
+      this.world.mission.add(group);
+      return { position, object: group, active: index === 0, index };
+    });
+    this.world.createRoute(this.gates.map(gate => gate.position).concat([this.gates[0].position]), 0xffd166);
+    if (this.stage.hazards) this.createHazards(4);
+  }
+
+  setupFinale() {
+    this.core = this.makeEntity("core", "energy_cell", { x: 0, z: -6 }, 1.35, { health: 5 });
+    this.core.marker = this.world.createMarker({ x: 0, z: -6 }, 0xbf8cff, 2.1);
+    this.phase = "defend";
+    this.finalWaveCount = 6;
+    this.rocketGoal = { kind: "rocket-goal", x: -13, z: -9, locked: true };
+  }
+
+  makeEntity(kind, model, position, scale, extras = {}) {
+    const object = this.world.createActor(model, position, scale);
+    return { kind, object, x: position.x, z: position.z, radius: 0.9, active: true, ...extras };
+  }
+
+  spawnEnemy(boss = false, index = 0, health = boss ? 12 : 2) {
+    const angle = index * 2.31 + 0.6;
+    const radius = boss ? 10 : 14 + (index % 3);
+    const position = this.stage.positions?.[index] || { x: Math.cos(angle) * radius, z: Math.sin(angle) * radius };
+    const enemy = this.makeEntity(boss ? "boss" : "enemy", "rust_scout", position, boss ? 1.24 : 0.68, { health, maxHealth: health, speed: boss ? 3.7 : 2.15 + (index % 3) * 0.2, boss, hitFlash: 0 });
+    this.cloneMaterials(enemy.object);
+    this.entities.push(enemy);
+    return enemy;
+  }
+
+  cloneMaterials(object) {
+    object.traverse(child => { if (child.isMesh) child.material = child.material.clone(); });
+  }
+
+  tint(object, color, emissive = 0) {
+    object.traverse(child => {
+      if (!child.isMesh || !child.material?.color) return;
+      child.material.color.lerp(new THREE.Color(color), 0.72);
+      if (child.material.emissive) { child.material.emissive.set(color); child.material.emissiveIntensity = emissive; }
+    });
+  }
+
+  routePositions(count) {
+    return Array.from({ length: count }, (_, index) => {
+      const angle = -Math.PI / 2 + (index / count) * Math.PI * 2;
+      const radius = 11 + (index % 2) * 3;
+      return { x: Math.cos(angle) * radius, z: Math.sin(angle) * radius };
+    });
+  }
+
+  createHazards(count) {
+    this.hazards = Array.from({ length: count }, (_, index) => {
+      const angle = index * Math.PI * 2 / count;
+      const mesh = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.16, 8, 24), new THREE.MeshBasicMaterial({ color: 0xff5d49, transparent: true, opacity: 0.82 }));
+      mesh.rotation.x = Math.PI / 2;
+      this.world.mission.add(mesh);
+      return { object: mesh, angle, radius: 7 + index * 1.5, x: 0, z: 0, cooldown: 0 };
+    });
+  }
+
+  update(dt) {
+    if (!this.running || this.paused) return;
+    this.elapsed += dt;
+    this.time -= dt;
+    this.invulnerable = Math.max(0, this.invulnerable - dt);
+    this.pulseCooldown = Math.max(0, this.pulseCooldown - dt);
+    this.dashCooldown = Math.max(0, this.dashCooldown - dt);
+    this.dashTime = Math.max(0, this.dashTime - dt);
+
+    this.updatePlayer(dt);
+    this.updateMission(dt);
+    this.updatePrompt();
+    this.updateHUD();
+
+    if (this.input.consume("pulse")) this.pulse();
+    if (this.input.consume("dash")) this.dash();
+    if (this.input.consume("interact")) this.interact();
+    if (this.input.consume("pause")) this.pause();
+    if (this.time <= 0 && this.running) this.finish(false, "The mission clock expired before the objective was complete.");
+    if (this.shields <= 0 && this.running) this.finish(false, "KAI's shield is empty. Dash away from red warning zones and try again.");
+  }
+
+  updatePlayer(dt) {
+    const move = this.input.movement();
+    if (Math.hypot(move.x, move.y) > 0.05) {
+      const speed = this.player.speed * (this.dashTime > 0 ? 2.4 : 1);
+      this.player.x = clamp(this.player.x + move.x * speed * dt, -18, 18);
+      this.player.z = clamp(this.player.z + move.y * speed * dt, -18, 18);
+      const islandLimit = 18.5;
+      const radius = Math.hypot(this.player.x, this.player.z);
+      if (radius > islandLimit) { this.player.x *= islandLimit / radius; this.player.z *= islandLimit / radius; }
+      this.player.object.rotation.y = Math.atan2(move.x, move.y);
+      this.player.object.position.set(this.player.x, 0.55 + Math.sin(this.elapsed * 10) * 0.035, this.player.z);
+    }
+    this.player.object.rotation.z *= Math.max(0, 1 - dt * 8);
+    if (this.carry) {
+      this.carry.x = this.player.x;
+      this.carry.z = this.player.z;
+      this.carry.object.position.set(this.player.x, 3.1, this.player.z);
+      this.carry.object.rotation.y += dt * 2;
+    }
+  }
+
+  updateMission(dt) {
+    if (this.stage.type === "race-collect") {
+      this.entities.filter(entity => entity.kind === "cell" && entity.active).forEach(entity => {
+        entity.angle += dt * 0.35;
+        entity.x += Math.sin(entity.angle) * dt * 0.35;
+        entity.z += Math.cos(entity.angle) * dt * 0.35;
+        entity.object.position.set(entity.x, 0.72 + Math.sin(this.elapsed * 3 + entity.angle) * 0.22, entity.z);
+      });
+    }
+    if (this.stage.type === "rescue") this.updateTide(dt);
+    if (["combat", "defense", "boss", "finale", "collect"].includes(this.stage.type)) this.updateEnemies(dt);
+    if (this.stage.type === "defense") this.updateDefense(dt);
+    if (this.stage.type === "boss") this.updateBoss(dt, this.boss);
+    if (this.stage.type === "race") this.updateRace();
+    if (this.stage.type === "finale") this.updateFinale(dt);
+    this.updateHazards(dt);
+    this.entities.forEach(entity => {
+      if (entity.active && ["cell", "node"].includes(entity.kind)) entity.object.rotation.y += dt * 0.8;
+      if (entity.marker?.userData.ring) entity.marker.visible = entity.active;
+    });
+  }
+
+  updateTide() {
+    const amount = clamp(this.elapsed / this.stage.time, 0, 1);
+    this.tide.scale.setScalar(1.7 - amount * 0.75);
+    this.tide.material.opacity = 0.22 + amount * 0.24;
+    if (amount > 0.72) {
+      const stranded = this.entities.find(entity => entity.kind === "creature" && entity.active && !entity.carried);
+      if (stranded && Math.hypot(stranded.x, stranded.z) > 10 + (1 - amount) * 12) this.ui.message("The tide is close to a beach friend!", true);
+    }
+  }
+
+  updateEnemies(dt) {
+    for (const enemy of this.entities.filter(entity => ["enemy", "boss"].includes(entity.kind) && entity.active)) {
+      if (enemy.boss) continue;
+      const target = this.stage.type === "defense" ? this.relay : this.stage.type === "finale" ? this.core : this.player;
+      if (!target) continue;
+      const d = distance(enemy, target) || 1;
+      enemy.x += ((target.x - enemy.x) / d) * enemy.speed * dt;
+      enemy.z += ((target.z - enemy.z) / d) * enemy.speed * dt;
+      enemy.object.position.set(enemy.x, 0.55, enemy.z);
+      enemy.object.rotation.y = Math.atan2(target.x - enemy.x, target.z - enemy.z);
+      if (distance(enemy, this.player) < 1.35) {
+        this.damagePlayer();
+        enemy.x += (enemy.x - this.player.x) / d * 2;
+        enemy.z += (enemy.z - this.player.z) / d * 2;
+      }
+      if (this.stage.type === "defense" && distance(enemy, this.relay) < 1.4) {
+        this.disableEntity(enemy, false);
+        this.escaped += 1;
+        this.shields = Math.max(0, this.shields - 1);
+        this.invulnerable = 0;
+        this.ui.message("A scout reached the relay!", true);
+      }
+      if (this.stage.type === "finale" && this.core && distance(enemy, this.core) < 1.5) {
+        this.disableEntity(enemy, false);
+        this.core.health -= 1;
+        this.ui.message(`Core integrity ${this.core.health} / 5`, true);
+        if (this.core.health <= 0) this.finish(false, "The Warden overwhelmed the Aurora Core. Use pulse and dash to intercept scouts earlier.");
+      }
+    }
+  }
+
+  updateDefense(dt) {
+    if (this.phase !== "battle") return;
+    this.spawnTimer -= dt;
+    if (this.spawned < this.stage.count && this.spawnTimer <= 0) {
+      this.spawnEnemy(false, this.spawned);
+      this.spawned += 1;
+      this.spawnTimer = 2.6;
+    }
+    for (const turret of this.turrets || []) {
+      turret.cooldown = Math.max(0, turret.cooldown - dt);
+      const target = this.entities.find(entity => entity.kind === "enemy" && entity.active && distance(turret, entity) < 8.5);
+      if (target && turret.cooldown <= 0) {
+        turret.cooldown = 0.8;
+        target.health -= 1;
+        this.world.pulse(target, 0.55, 0xffd166);
+        if (target.health <= 0) this.disableEntity(target);
+      }
+    }
+    if (this.spawned >= this.stage.count && !this.entities.some(entity => entity.kind === "enemy" && entity.active)) {
+      if (this.escaped === 0) this.finish(true, "The relay is secure and every scout has rebooted safely.");
+      else this.finish(false, `${this.escaped} scout${this.escaped === 1 ? "" : "s"} reached the relay. Place turrets across every approach.`);
+    }
+  }
+
+  updateBoss(dt, boss) {
+    if (!boss?.active) return;
+    boss.stateTime -= dt;
+    if (boss.state === "shielded" && boss.stateTime <= 0) {
+      boss.state = "warning";
+      boss.stateTime = 1.35;
+      boss.chargeX = this.player.x;
+      boss.chargeZ = this.player.z;
+      boss.warningLine = this.world.createRoute([{ x: boss.x, z: boss.z }, { x: boss.chargeX, z: boss.chargeZ }], 0xff493b);
+      this.ui.message("Orange line—dash sideways!", true);
+      this.tint(boss.object, 0xff7b4b, 1.8);
+    } else if (boss.state === "warning" && boss.stateTime <= 0) {
+      boss.state = "charge";
+      boss.stateTime = 1.0;
+      if (boss.warningLine) { this.world.mission.remove(boss.warningLine); boss.warningLine = null; }
+    } else if (boss.state === "charge") {
+      const d = Math.hypot(boss.chargeX - boss.x, boss.chargeZ - boss.z) || 1;
+      boss.x += ((boss.chargeX - boss.x) / d) * 11 * dt;
+      boss.z += ((boss.chargeZ - boss.z) / d) * 11 * dt;
+      boss.object.position.set(boss.x, 0.55, boss.z);
+      if (distance(boss, this.player) < 1.8) this.damagePlayer();
+      if (boss.stateTime <= 0 || d < 0.5) {
+        boss.state = "exposed";
+        boss.stateTime = 2.8;
+        this.tint(boss.object, 0x65e5ff, 1.2);
+        this.ui.message("Core exposed—pulse now!");
+      }
+    } else if (boss.state === "exposed" && boss.stateTime <= 0) {
+      boss.state = "shielded";
+      boss.stateTime = 2.2;
+      this.tint(boss.object, 0xc54831, 0.2);
+    }
+  }
+
+  updateRace() {
+    const gate = this.gates?.[this.progressCount];
+    if (!gate || distance(this.player, gate.position) >= 1.8) return;
+    gate.object.visible = false;
+    this.progressCount += 1;
+    const next = this.gates[this.progressCount];
+    if (next) {
+      next.active = true;
+      next.object.traverse(child => { if (child.material?.emissive) child.material.emissive.set(0xffd166); });
+      this.ui.message(`Gate ${this.progressCount} clear`);
+    } else {
+      const clean = !this.stage.minShield || this.shields >= this.stage.minShield;
+      if (clean) this.finish(true, "Skyway complete. The route stayed bright behind you.");
+      else this.finish(false, `Course complete, but ${this.stage.minShield} shield charges must remain.`);
+    }
+  }
+
+  updateFinale(dt) {
+    if (this.phase === "defend") {
+      this.spawnTimer -= dt;
+      if (this.spawned < this.finalWaveCount && this.spawnTimer <= 0) {
+        this.spawnEnemy(false, this.spawned);
+        this.spawned += 1;
+        this.spawnTimer = 2.2;
+      }
+      if (this.spawned >= this.finalWaveCount && !this.entities.some(entity => entity.kind === "enemy" && entity.active)) {
+        this.phase = "warden";
+        this.setupBoss(true);
+        this.ui.message("Rust Warden incoming!", true);
+      }
+    } else if (this.phase === "warden") {
+      this.updateBoss(dt, this.boss);
+      if (!this.boss.active) {
+        this.phase = "launch";
+        this.rocketGoal.locked = false;
+        this.world.createMarker({ x: -13, z: -9 }, 0xffd166, 2.2);
+        this.ui.message("Warden restored. Reach the rocket and launch!");
+      }
+    }
+  }
+
+  updateHazards(dt) {
+    for (const hazard of this.hazards || []) {
+      hazard.angle += dt * (0.45 + hazard.radius * 0.012);
+      hazard.x = Math.cos(hazard.angle) * hazard.radius;
+      hazard.z = Math.sin(hazard.angle) * hazard.radius;
+      hazard.object.position.set(hazard.x, 0.66, hazard.z);
+      hazard.cooldown = Math.max(0, hazard.cooldown - dt);
+      if (hazard.cooldown <= 0 && distance(hazard, this.player) < 1.5) {
+        hazard.cooldown = 1.4;
+        this.damagePlayer("Surge contact—one shield used.");
+      }
+    }
+  }
+
+  pulse() {
+    if (this.pulseCooldown > 0) return this.ui.message("Pulse is recharging", true);
+    const radius = this.item.chapterIndex >= 1 ? 4.1 : 3.45;
+    const damage = this.item.chapterIndex >= 3 ? 2 : 1;
+    this.pulseCooldown = 1.1;
+    this.world.pulse(this.player, radius, 0x65e5ff);
+    let hits = 0;
+    for (const entity of this.entities.filter(entity => entity.active && distance(entity, this.player) <= radius)) {
+      if (entity.kind === "cell") {
+        this.collect(entity);
+        hits += 1;
+      } else if (entity.kind === "node") {
+        this.activateNode(entity);
+        hits += 1;
+      } else if (["enemy", "boss"].includes(entity.kind)) {
+        if (entity.boss && entity.state !== "exposed") {
+          this.ui.message("The shield is solid—bait a charge first", true);
+          continue;
+        }
+        entity.health -= damage;
+        hits += 1;
+        this.world.pulse(entity, 0.45, 0xffd166);
+        if (entity.health <= 0) this.disableEntity(entity, ["combat", "defense", "finale"].includes(this.stage.type));
+        else this.ui.message(`${entity.boss ? "Warden" : "Scout"} core ${entity.health} / ${entity.maxHealth}`);
+      }
+    }
+    if (!hits) this.ui.message("No pulse target in range", true);
+  }
+
+  collect(entity) {
+    if (!entity.active) return;
+    entity.active = false;
+    entity.object.visible = false;
+    if (entity.marker) entity.marker.visible = false;
+    this.progressCount += 1;
+    this.ui.message(`Energy collected · ${this.progressCount}/${this.stage.count}`);
+    if (this.progressCount >= this.stage.count) {
+      if (this.goal) { this.goal.locked = false; this.ui.message("All cells charged—repair the gold beacon"); }
+      else this.finish(true, "Every energy cell is safely back in the network.");
+    }
+  }
+
+  activateNode(entity) {
+    const result = sequenceStep(this.expected, this.sequenceIndex, entity.id);
+    if (!result.correct) {
+      this.wrongActions += 1;
+      this.ui.message(`Follow the circuit: ${this.stage.labels[this.sequenceIndex]} is next`, true);
+      return;
+    }
+    entity.active = false;
+    this.tint(entity.object, 0x4cde8a, 1.3);
+    this.sequenceIndex = result.index;
+    this.progressCount = result.index;
+    this.ui.message(result.complete ? "Signal route complete" : `${this.stage.labels[result.index]} is next`);
+    if (result.complete) this.finish(true, "The signal followed a complete, logical path through every node.");
+  }
+
+  dash() {
+    if (this.dashCooldown > 0) return this.ui.message("Dash is recharging", true);
+    this.dashTime = this.item.chapterIndex >= 4 ? 0.55 : 0.36;
+    this.dashCooldown = this.item.chapterIndex >= 4 ? 1.8 : 2.5;
+    this.invulnerable = Math.max(this.invulnerable, this.dashTime);
+  }
+
+  interact() {
+    if (this.stage.type === "rescue") return this.interactRescue();
+    if (this.stage.type === "defense" && this.phase === "prepare") return this.interactPad();
+    if (this.goal && distance(this.player, this.goal) < 2.2) {
+      if (this.goal.locked) return this.ui.message("The beacon still needs every energy cell", true);
+      return this.finish(true, "BOLT is online and the restored beacon points toward the next fragment.");
+    }
+    if (this.finalBeacon && distance(this.player, this.finalBeacon) < 2.2) {
+      if (this.progressCount < this.stage.count) return this.ui.message("Bring every beach friend to safety first", true);
+      return this.finish(true, "The tide beacon is offline and the second fragment is secure.");
+    }
+    if (this.stage.type === "finale" && this.phase === "launch" && distance(this.player, this.rocketGoal) < 3) return this.finish(true, "The Aurora beam returns. The festival rocket rises over a safe, shining beach.");
+    this.ui.message("Move closer to the highlighted target", true);
+  }
+
+  interactRescue() {
+    if (this.carry) {
+      if (distance(this.player, this.shelter) > 2.5) return this.ui.message("Carry your friend to the green shelter", true);
+      this.carry.active = false;
+      this.carry.carried = false;
+      this.carry.object.visible = false;
+      this.carry = null;
+      this.progressCount += 1;
+      this.ui.message(`Friend safe · ${this.progressCount}/${this.stage.count}`);
+      if (this.progressCount >= this.stage.count && !this.finalBeacon) this.finish(true, "Every beach friend reached high ground before the tide.");
+      else if (this.progressCount >= this.stage.count) { this.finalBeacon.locked = false; this.ui.message("Everyone is safe—disable the orange tide beacon"); }
+      return;
+    }
+    const creature = this.entities.find(entity => entity.kind === "creature" && entity.active && !entity.carried && distance(entity, this.player) < 2.1);
+    if (!creature) return this.ui.message("Move close to a beach friend", true);
+    creature.carried = true;
+    if (creature.marker) creature.marker.visible = false;
+    this.carry = creature;
+    this.ui.message("Friend aboard—head for green high ground");
+  }
+
+  interactPad() {
+    const pad = this.pads.find(candidate => !candidate.placed && distance(this.player, candidate.position) < 2.2);
+    if (!pad) return this.ui.message("Stand inside a gold turret pad", true);
+    pad.placed = true;
+    pad.marker.visible = false;
+    const turretObject = this.world.createActor("turret", pad.position, 1.0);
+    this.turrets.push({ ...pad.position, object: turretObject, cooldown: 0 });
+    this.progressCount += 1;
+    this.ui.message(`Turret placed · ${this.progressCount}/${this.stage.pads}`);
+    if (this.progressCount >= this.stage.pads) {
+      this.phase = "battle";
+      this.progressCount = 0;
+      this.ui.message("Defense line ready—scouts incoming!", true);
+    }
+  }
+
+  disableEntity(entity, count = true) {
+    if (!entity.active) return;
+    entity.active = false;
+    entity.object.scale.multiplyScalar(entity.boss ? 0.82 : 0.92);
+    this.tint(entity.object, 0x4bd6c4, 0.8);
+    if (count) this.progressCount += 1;
+    if (entity.kind === "boss") {
+      if (this.stage.type === "boss") this.finish(true, "The Rust Captain rebooted peacefully and released the third fragment.");
+      return;
+    }
+    if (this.stage.type === "combat" && this.progressCount >= this.stage.count) {
+      this.goal.locked = false;
+      this.ui.message("Scouts restored—activate the marina beacon");
+    }
+  }
+
+  damagePlayer(message = "Impact absorbed—dash away!") {
+    const result = applyHit(this.shields, this.invulnerable);
+    this.shields = result.shields;
+    this.invulnerable = result.invulnerable;
+    if (result.damaged) {
+      this.ui.message(message, true);
+      if (!this.progress.settings.reducedMotion) this.player.object.rotation.z = 0.12;
+    }
+  }
+
+  updatePrompt() {
+    let text = "";
+    if (this.stage.type === "rescue") {
+      if (this.carry && distance(this.player, this.shelter) < 2.5) text = "E · SET FRIEND DOWN SAFELY";
+      else if (!this.carry && this.entities.some(entity => entity.kind === "creature" && entity.active && distance(entity, this.player) < 2.1)) text = "E · PICK UP FRIEND";
+    } else if (this.stage.type === "defense" && this.phase === "prepare" && this.pads.some(pad => !pad.placed && distance(this.player, pad.position) < 2.2)) text = "E · PLACE SOLAR TURRET";
+    else if (this.goal && distance(this.player, this.goal) < 2.2) text = this.goal.locked ? "BEACON NEEDS MORE ENERGY" : "E · REPAIR BEACON";
+    else if (this.finalBeacon && distance(this.player, this.finalBeacon) < 2.2) text = "E · DISABLE TIDE BEACON";
+    else if (this.stage.type === "finale" && this.phase === "launch" && distance(this.player, this.rocketGoal) < 3) text = "E · LAUNCH FESTIVAL ROCKET";
+    this.ui.prompt(text);
+  }
+
+  progressText() {
+    if (this.stage.type === "defense") return this.phase === "prepare" ? `${this.progressCount} / ${this.stage.pads} turrets` : `${this.progressCount} / ${this.stage.count} scouts`;
+    if (this.stage.type === "boss") return `${Math.max(0, this.boss.health)} / ${this.boss.maxHealth} core`;
+    if (this.stage.type === "finale") {
+      if (this.phase === "defend") return `${this.progressCount} / ${this.finalWaveCount} scouts`;
+      if (this.phase === "warden") return `${Math.max(0, this.boss.health)} / ${this.boss.maxHealth} Warden`;
+      return "Rocket ready";
+    }
+    return `${this.progressCount} / ${this.stage.count}`;
+  }
+
+  updateHUD() {
+    this.ui.updateHUD({
+      time: this.time,
+      progressText: this.progressText(),
+      progressIcon: this.item.chapter.icon,
+      shields: this.shields,
+      pulseReady: 1 - clamp(this.pulseCooldown / 1.1, 0, 1),
+      dashReady: 1 - clamp(this.dashCooldown / 2.5, 0, 1),
+    });
+  }
+
+  pause() {
+    if (!this.running) return;
+    this.paused = true;
+    this.input.clear();
+    this.ui.modal({ icon: "Ⅱ", eyebrow: "Mission paused", title: this.stage.name, text: this.stage.objective, actions: [
+      { label: "Resume", run: () => { this.paused = false; } },
+      { label: "Restart", run: () => this.begin(this.item) },
+      { label: "Mission map", run: () => { this.stop(); this.ui.showMap(); } },
+    ] });
+  }
+
+  finish(won, text) {
+    if (!this.running) return;
+    this.running = false;
+    this.paused = false;
+    this.ui.prompt("");
+    if (won) {
+      const challenge = this.shields >= 2 && this.wrongActions === 0;
+      this.progress = recordResult(this.progress, this.item.chapter, this.stage, Math.max(0, this.time), challenge);
+      this.save(this.progress);
+      this.ui.setProgress(this.progress);
+      const result = this.progress.results[`${this.item.chapter.id}:${this.stage.id}`];
+      this.ui.modal({ icon: "✦", eyebrow: "Mission complete", title: this.stage.name, text, stats: [["◆".repeat(result.medals), "medals"], [Math.ceil(this.time), "seconds left"], [this.shields, "shield"]], actions: [
+        { label: "Continue", run: () => { this.stop(); this.ui.showMap(); } },
+        { label: "Replay", run: () => this.begin(this.item) },
+      ] });
+    } else {
+      this.ui.modal({ icon: "↻", eyebrow: "Mission incomplete", title: "The beach needs another try", text, stats: [[this.progressText(), "progress"], [this.shields, "shield"]], actions: [
+        { label: "Try again", run: () => this.begin(this.item) },
+        { label: "Mission map", run: () => { this.stop(); this.ui.showMap(); } },
+      ] });
+    }
+  }
+
+  stop() {
+    this.running = false;
+    this.paused = false;
+    this.world.clearMission();
+    this.input.clear();
+  }
+}

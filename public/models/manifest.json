@@ -1,0 +1,66 @@
+{
+  "generator": "Blender 4.5.3 LTS / tools/blender/build_assets.py",
+  "source": "assets/blender/robot_beach_assets.blend",
+  "assets": [
+    {
+      "name": "kai",
+      "file": "kai.glb",
+      "bytes": 110708,
+      "meshFaces": 600
+    },
+    {
+      "name": "bolt",
+      "file": "bolt.glb",
+      "bytes": 44424,
+      "meshFaces": 108
+    },
+    {
+      "name": "rust_scout",
+      "file": "rust_scout.glb",
+      "bytes": 110756,
+      "meshFaces": 600
+    },
+    {
+      "name": "lighthouse",
+      "file": "lighthouse.glb",
+      "bytes": 48284,
+      "meshFaces": 262
+    },
+    {
+      "name": "energy_cell",
+      "file": "energy_cell.glb",
+      "bytes": 26740,
+      "meshFaces": 54
+    },
+    {
+      "name": "turret",
+      "file": "turret.glb",
+      "bytes": 20900,
+      "meshFaces": 126
+    },
+    {
+      "name": "rocket",
+      "file": "rocket.glb",
+      "bytes": 38932,
+      "meshFaces": 80
+    },
+    {
+      "name": "crab",
+      "file": "crab.glb",
+      "bytes": 58404,
+      "meshFaces": 460
+    },
+    {
+      "name": "beacon",
+      "file": "beacon.glb",
+      "bytes": 17768,
+      "meshFaces": 112
+    },
+    {
+      "name": "palm",
+      "file": "palm.glb",
+      "bytes": 58416,
+      "meshFaces": 54
+    }
+  ]
+}
