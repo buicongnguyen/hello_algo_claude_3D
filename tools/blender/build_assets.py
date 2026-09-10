@@ -122,15 +122,35 @@ def robot(name="KAI_Robot", hostile=False):
     return r
 
 
-def dog():
-    r = root("BOLT_Dog")
-    cube("Body", (0, 0, 0.72), (0.72, 0.33, 0.35), WHITE, 0.16, r)
-    cube("Head", (0, -0.62, 0.92), (0.38, 0.35, 0.34), WHITE, 0.14, r)
-    cube("Visor", (0, -0.97, 0.95), (0.25, 0.04, 0.08), CYAN, 0.04, r)
+def dog(hostile=False):
+    r = root("Zombie_Dog" if hostile else "BOLT_Dog")
+    shell = CORAL if hostile else WHITE
+    light = ORANGE if hostile else CYAN
+    cube("Body", (0, 0, 0.72), (0.72, 0.33, 0.35), shell, 0.16, r)
+    cube("Head", (0, -0.62, 0.92), (0.38, 0.35, 0.34), shell, 0.14, r)
+    cube("Visor", (0, -0.97, 0.95), (0.25, 0.04, 0.08), light, 0.04, r)
+    if hostile:
+        for x in (-0.26, 0.26):
+            cone("PointyEar", (x, -0.45, 1.4), 0.15, 0.02, 0.4, NAVY, r, 6)
     for x in (-0.48, 0.48):
         for y in (-0.20, 0.22):
-            cylinder("Leg", (x, y, 0.30), 0.08, 0.52, NAVY, r)
-    tail = cylinder("Tail", (0, 0.48, 1.02), 0.06, 0.7, CYAN, r, rotation=(math.radians(48), 0, 0))
+            hip = root(f"Hip_{'L' if x < 0 else 'R'}_{y}")
+            hip.parent = r
+            hip.location = (x, y, 0.56)
+            cylinder("Leg", (0, 0, -0.26), 0.08, 0.52, NAVY, hip)
+    cylinder("Tail", (0, 0.48, 1.02), 0.06, 0.7, light, r, rotation=(math.radians(48), 0, 0))
+    return r
+
+
+def drone():
+    r = root("Rust_Drone")
+    sphere("DroneCore", (0, 0, 0.38), (0.55, 0.42, 0.32), CORAL, r)
+    cube("AngryVisor", (0, -0.4, 0.38), (0.3, 0.06, 0.09), ORANGE, 0.03, r)
+    for x in (-0.72, 0.72):
+        for y in (-0.55, 0.55):
+            cube("Strut", (x * 0.6, y * 0.6, 0.38), (0.42, 0.07, 0.05), NAVY, 0.02, r)
+            cylinder("Rotor", (x, y, 0.47), 0.36, 0.05, NAVY, r, 12)
+            cube("RotorBlade", (x, y, 0.52), (0.40, 0.06, 0.025), ORANGE, 0.01, r)
     return r
 
 
@@ -210,6 +230,8 @@ def palm():
 builders = {
     "kai": lambda: robot(),
     "bolt": dog,
+    "zombie_dog": lambda: dog(True),
+    "rust_drone": drone,
     "rust_scout": lambda: robot("Rust_Scout", True),
     "lighthouse": lighthouse,
     "energy_cell": energy_cell,

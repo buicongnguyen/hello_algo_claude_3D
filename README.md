@@ -9,6 +9,9 @@ This is a playable browser-game foundation, with a documented roadmap toward a m
 ## Features
 
 - Five story chapters and fifteen missions.
+- **Beach Brawl:** an immediately available three-wave zombie robot beach party, independent of campaign unlocks.
+- Bubble Blaster and chaining Arc Fork pickups; tiny zombie bots, pouncing robot dogs and diving drones.
+- Freeze Pops, a summoned crab crew, and scrap-funded repairs that turn defeated robots into teammates.
 - One consistent control scheme across collection, signal puzzles, rescue, defense, racing and boss encounters.
 - Blender-authored GLB characters and landmarks with procedural fallbacks.
 - Persistent campaign progress, medals and chapter upgrades.
@@ -20,10 +23,17 @@ This is a playable browser-game foundation, with a documented roadmap toward a m
 ## Controls
 
 - `WASD` or arrows — move
-- `Q` or Space — pulse
+- Hold Space, `J`, or the left mouse button on the island — fire your equipped weapon (auto-aim)
+- `Q` — unlimited close-range pulse, including when ammunition is empty
+- `F` — use a Freeze Pop
+- `R` — summon the crab crew with a Crab Whistle
 - `Shift` — dash
-- `E` or Enter — interact
+- `E` or Enter — interact / repair a nearby downed robot for 2 scrap (maximum 3 robot teammates)
 - `Escape` — pause
+
+Walk over glowing items to pick them up. Touch players have a movement stick and labeled Fire, Pulse, Dash, Use, Freeze and Call buttons. Start with **Beach Brawl · Play now** for immediate fighting, or **Begin journey** for the story campaign.
+
+See [COMBAT_UPDATE.md](./COMBAT_UPDATE.md) for the combat design, balance rules, resource limits and verification.
 
 ## Development
 

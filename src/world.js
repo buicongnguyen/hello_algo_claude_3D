@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-const MODEL_NAMES = ["kai", "bolt", "rust_scout", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm"];
+const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm"];
 
 export class World {
   constructor(canvas, settings) {

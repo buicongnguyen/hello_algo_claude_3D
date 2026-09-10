@@ -50,6 +50,27 @@ try {
   });
   await page.waitForTimeout(600);
   await page.screenshot({ path: join(OUT, "06-circuit.png") });
+  const setupBrawl = () => {
+    const api = window.__ROBOT_BEACH__;
+    api.game.begin(api.brawl);
+    const c = api.game.combat;
+    c.collect(c.pickups.find(p => p.type === "bubble"));
+    c.freezeCharges = 2; c.whistles = 1;
+    for (let i = 0; i < 3; i++) {
+      const e = api.game.spawnEnemy(false, i);
+      e.x = -4 + i * 4; e.z = 5;
+    }
+    c.callAnimals();
+    api.ui.hideDialogue();
+  };
+  await page.evaluate(setupBrawl);
+  await page.waitForTimeout(650);
+  await page.screenshot({ path: join(OUT, "07-brawl-desktop.png") });
+  await mobile.evaluate(setupBrawl);
+  await mobile.waitForTimeout(650);
+  await mobile.screenshot({ path: join(OUT, "08-brawl-portrait.png") });
+  await mobile.setViewportSize({ width: 844, height: 390 });
+  await mobile.screenshot({ path: join(OUT, "09-brawl-landscape.png") });
   console.log(`Visual captures written to ${OUT}`);
 } finally {
   if (browser) await browser.close();

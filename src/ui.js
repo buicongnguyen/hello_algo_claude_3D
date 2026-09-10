@@ -18,6 +18,7 @@ export class UI {
 
   bind() {
     document.querySelector("#continueButton").addEventListener("click", () => this.callbacks.continue());
+    document.querySelector("#brawlButton").addEventListener("click", () => this.callbacks.brawl());
     document.querySelector("#missionsButton").addEventListener("click", () => this.showMap());
     document.querySelector("#roamButton").addEventListener("click", () => this.callbacks.roam());
     document.querySelectorAll("[data-screen='title']").forEach(button => button.addEventListener("click", () => this.showTitle()));
@@ -95,18 +96,18 @@ export class UI {
     this.selected = item;
     this.showOnly("briefing");
     document.querySelector("#briefIcon").textContent = item.chapter.icon;
-    document.querySelector("#briefChapter").textContent = `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`;
+    document.querySelector("#briefChapter").textContent = item.stage.type === "brawl" ? "Arcade · 3 waves · available now" : `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`;
     document.querySelector("#briefTitle").textContent = item.stage.name;
     document.querySelector("#briefStory").textContent = item.stage.story;
     document.querySelector("#briefObjective").textContent = item.stage.objective;
-    document.querySelector("#briefReward").textContent = item.stageIndex === 2 ? `Chapter reward · ${item.chapter.reward}` : `Next · ${item.chapter.stages[item.stageIndex + 1]?.name || item.chapter.reward}`;
+    document.querySelector("#briefReward").textContent = item.stage.type === "brawl" ? "Weapons · Freeze Pops · Crab crew · Repaired teammates" : item.stageIndex === 2 ? `Chapter reward · ${item.chapter.reward}` : `Next · ${item.chapter.stages[item.stageIndex + 1]?.name || item.chapter.reward}`;
   }
 
   showGame(item) {
     this.screens.forEach(screen => document.querySelector(`#${screen}`).classList.add("hidden"));
     this.hud.classList.remove("hidden");
     this.touch.classList.toggle("hidden", !matchMedia("(pointer: coarse)").matches);
-    this.write("hudChapter", `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`);
+    this.write("hudChapter", item.stage.type === "brawl" ? "Beach Brawl · survive the party" : `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`);
     this.write("hudTitle", item.stage.name);
     this.write("hudObjective", item.stage.objective);
   }
@@ -116,6 +117,19 @@ export class UI {
     this.write("hudProgress", state.progressText);
     this.write("hudProgressIcon", state.progressIcon || "⚡");
     this.write("hudShield", `${"◆".repeat(state.shields)}${"◇".repeat(Math.max(0, state.maxShields - state.shields))}`);
+    const combat = state.combat;
+    const active = Boolean(combat?.enabled);
+    document.querySelector("#combatPanel").classList.toggle("hidden", !active);
+    this.hud.classList.toggle("combat-active", active);
+    this.touch.classList.toggle("combat-active", active);
+    if (active) {
+      this.write("weaponName", combat.weapon === "arc" ? "Arc Fork" : combat.weapon ? "Bubble Blaster" : "Find a weapon crate");
+      this.write("weaponAmmo", combat.weapon ? `${combat.ammo} shots · hold Fire / Space` : "Walk over a glowing crate");
+      this.write("gadgetCount", `F Freeze ${combat.freezeCharges} · R Crabs ${combat.whistles}`);
+      this.write("teamCount", `${combat.scrap} scrap · ${combat.game.entities.filter(e => e.kind === "ally").length}/3 robot pals`);
+      this.write("touchFreeze", `Freeze ${combat.freezeCharges}`);
+      this.write("touchCall", `Call ${combat.whistles}`);
+    }
     for (const [id, element, value] of [["pulse", this.pulseMeter, state.pulseReady], ["dash", this.dashMeter, state.dashReady]]) {
       const rounded = Math.round(value * 100);
       if (this.cache[id] !== rounded) { element.style.setProperty("--ready", `${rounded}%`); this.touchMeters[id].style.setProperty("--ready", `${rounded}%`); this.cache[id] = rounded; }

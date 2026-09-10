@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as THREE from "three";
 import { Game } from "../src/game.js";
 import { World } from "../src/world.js";
-import { ALL_STAGES, findStage } from "../src/missions.js";
+import { ALL_STAGES, BRAWL, findStage } from "../src/missions.js";
 import { createProgress, earnedUpgrades, recordResult } from "../src/rules.js";
 
 function harness(progress = createProgress()) {
@@ -182,4 +182,193 @@ test("mission disposal frees unique resources and preserves cached Blender geome
   World.prototype.release.call({ assetResources: new Set([sharedGeometry, sharedMaterial]) }, group);
   assert.equal(sharedDisposed, 0);
   assert.equal(uniqueDisposed, 2);
+});
+
+test("weapons are pickups, consume ammunition on shots, and never replace unlimited pulse", () => {
+  const { game } = harness(); game.begin(BRAWL);
+  const c = game.combat;
+  assert.equal(c.shoot(), false);
+  c.collect(c.pickups.find(p => p.type === "bubble"));
+  assert.equal(c.weapon, "bubble");
+  assert.equal(c.ammo, 36);
+  assert.equal(c.shoot(), false, "no enemy means no ammunition wasted");
+  const enemy = game.spawnEnemy(false, 0);
+  Object.assign(enemy, { x: game.player.x + 3, z: game.player.z });
+  assert.equal(c.shoot(), true);
+  assert.equal(c.ammo, 35);
+  c.updateBullets(0.2);
+  assert.equal(enemy.health, 1, "swept bullet should hit the tiny target");
+  c.ammo = 0;
+  pulseAt(game, enemy);
+  assert.equal(enemy.active, false);
+});
+
+test("freeze interrupts dog pounces and drone dives without opening boss shields", () => {
+  const { game } = harness(); game.begin(BRAWL);
+  const c = game.combat;
+  c.freezeCharges = 1;
+  const dog = game.spawnEnemy(false, 1);
+  const drone = game.spawnEnemy(false, 2);
+  Object.assign(dog, { x: 1, z: 8, attackState: "rush" });
+  Object.assign(drone, { x: 2, z: 8, attackState: "rush" });
+  assert.equal(c.freeze(), true);
+  assert.equal(dog.frozen, 5); assert.equal(drone.frozen, 5);
+  const before = { x: dog.x, z: dog.z };
+  game.updateEnemies(1);
+  assert.deepEqual({ x: dog.x, z: dog.z }, before);
+  assert.equal(dog.attackState, "recover");
+  game.begin(findStage("captain"));
+  game.combat.freezeCharges = 1; move(game, game.boss);
+  game.combat.freeze();
+  assert.equal(game.boss.frozen, 1.5);
+  game.combat.hit(game.boss, 20);
+  assert.equal(game.boss.health, game.boss.maxHealth);
+});
+
+test("repairs spend scrap once and recruited robots fight only hostiles", () => {
+  const { game } = harness(); game.begin(BRAWL);
+  const bot = game.spawnEnemy(false, 0), dog = game.spawnEnemy(false, 1);
+  defeat(game, bot); defeat(game, dog);
+  assert.equal(game.combat.scrap, 2);
+  move(game, bot); game.interact();
+  assert.equal(bot.kind, "ally");
+  assert.equal(game.combat.scrap, 0);
+  assert.equal(game.combat.kills, 2);
+  assert.equal(game.combat.repair(), false, "the same ally cannot be repaired twice");
+  const target = game.spawnEnemy(false, 2);
+  target.x = bot.x + 2; target.z = bot.z;
+  game.combat.updateAllies(1);
+  assert.equal(target.health, 1);
+  assert.equal(bot.active, true);
+  assert.equal(game.combat.hit(bot, 99), false, "friendly fire cannot change objectives or drop scrap");
+});
+
+test("animal calls have a duration and a bounded crew", () => {
+  const { game } = harness(); game.begin(BRAWL);
+  game.combat.whistles = 2;
+  game.combat.callAnimals(); game.combat.callAnimals();
+  assert.equal(game.combat.animals.length, 3);
+  assert.equal(game.combat.whistles, 0);
+  game.combat.updateAllies(15);
+  assert.ok(game.combat.animals.every(animal => !animal.object.visible));
+});
+
+test("arc weapon chains at most three nearby hostiles", () => {
+  const { game } = harness(); game.begin(BRAWL);
+  game.combat.collect(game.combat.pickups.find(p => p.type === "arc"));
+  for (let i = 0; i < 4; i++) {
+    const e = game.spawnEnemy(false, i);
+    e.x = game.player.x + 2 + i; e.z = game.player.z;
+  }
+  game.combat.shoot();
+  assert.equal(game.combat.kills, 3);
+  assert.equal(game.combat.enemies().length, 1);
+});
+
+test("three brawl waves finish without unlocking or corrupting campaign progress", () => {
+  const { game, ui } = harness(); game.begin(BRAWL);
+  const variants = new Set();
+  for (let tick = 0; tick < 1000 && game.running; tick++) {
+    game.combat.updateBrawl(0.5);
+    for (const enemy of game.combat.enemies()) {
+      variants.add(enemy.variant);
+      assert.equal(enemy.maxHealth, game.combat.wave + 1);
+      defeat(game, enemy);
+    }
+  }
+  assert.equal(ui.outcome.eyebrow, "Brawl won");
+  assert.equal(game.combat.kills, 24);
+  assert.equal(variants.size, 3, "every enemy type appears regardless of defeat timing");
+  assert.equal(game.progress.completed.length, 0);
+  assert.ok(game.progress.brawlBest >= 2400);
+  const previous = game.combat;
+  game.begin(BRAWL);
+  assert.notEqual(game.combat, previous);
+  assert.equal(game.combat.scrap, 0);
+  assert.equal(game.combat.bullets.length, 0);
+});
+
+test("repairable bodies, allies, loot, and projectiles stay bounded", () => {
+  const { game, world } = harness(); game.begin(BRAWL);
+  const c = game.combat;
+  for (let i = 0; i < 20; i++) {
+    const enemy = game.spawnEnemy(false, i);
+    c.hit(enemy, enemy.health);
+  }
+  assert.equal(game.entities.filter(e => e.repairable).length, 6);
+  assert.equal(game.entities[0].object.parent, null, "old bodies must be released, not merely hidden");
+  const candidates = game.entities.filter(e => e.repairable);
+  for (const enemy of candidates.slice(0, 4)) { move(game, enemy); c.repair(); }
+  assert.equal(game.entities.filter(e => e.kind === "ally").length, 3);
+  assert.equal(c.scrap, 14, "a full team must not consume repair scrap");
+  for (let i = 0; i < 30; i++) c.addPickup("shield", { x: 0, z: 0 });
+  assert.equal(c.pickups.length, 18);
+  for (let i = 0; i < 40; i++) c.makeBolt([game.player, { x: 0, z: 0 }], 0xffffff);
+  assert.equal(c.bullets.length, 28);
+  c.collect(c.pickups.find(p => p.type === "bubble"));
+  c.cooldown = 0;
+  assert.equal(c.shoot(), false);
+  assert.equal(c.ammo, 36, "effect saturation cannot waste ammo");
+  c.updateBullets(1);
+  assert.equal(c.bullets.length, 0);
+  game.stop();
+  assert.equal(world.mission.children.length, 0);
+});
+
+test("dogs and drones telegraph a fixed, dodgeable attack before touching the player", () => {
+  const { game } = harness(); game.begin(BRAWL);
+  for (const index of [1, 2]) {
+    const enemy = game.spawnEnemy(false, index);
+    Object.assign(enemy, { x: 0, z: 9 });
+    game.combat.moveEnemy(enemy, game.player, 0.05);
+    assert.equal(enemy.attackState, "windup");
+    assert.ok(enemy.warningLine);
+    const rushX = enemy.rushX;
+    move(game, { x: 5, z: 13 });
+    game.combat.moveEnemy(enemy, game.player, 1);
+    assert.equal(enemy.attackState, "rush");
+    assert.equal(enemy.rushX, rushX, "warning direction cannot secretly retarget the player");
+    assert.equal(enemy.warningLine, null);
+    enemy.active = false;
+    move(game, { x: 0, z: 13 });
+  }
+});
+
+test("unavailable or capped consumables never waste inventory", () => {
+  const { game } = harness(); game.begin(BRAWL);
+  const c = game.combat;
+  c.freezeCharges = 1;
+  assert.equal(c.freeze(), false);
+  assert.equal(c.freezeCharges, 1);
+  c.freezeCharges = 3;
+  const ice = c.pickups.find(p => p.type === "freeze");
+  c.collect(ice);
+  assert.equal(ice.active, true);
+  assert.equal(c.freezeCharges, 3);
+  c.addPickup("shield", game.player);
+  const shield = c.pickups.find(p => p.type === "shield");
+  c.collect(shield);
+  assert.equal(shield.active, true);
+  game.shields--;
+  c.collect(shield);
+  assert.equal(shield.active, false);
+  assert.equal(game.shields, game.upgrades.maxShields);
+});
+
+test("optional loot guidance never hides required campaign actions or wastes shots on a boss shield", () => {
+  const { game } = harness(); game.begin(findStage("boardwalk"));
+  assert.match(game.objectiveTarget().label, /build/);
+  game.phase = "ready";
+  assert.match(game.objectiveTarget().label, /Defense ready/);
+  game.begin(findStage("captain"));
+  const c = game.combat;
+  c.collect(c.pickups.find(p => p.type === "bubble"));
+  move(game, game.boss);
+  assert.equal(c.shoot(), false);
+  assert.equal(c.ammo, 36);
+  game.boss.state = "exposed";
+  assert.equal(c.shoot(), true);
+  game.begin(ALL_STAGES.find(item => item.stage.type === "combat"));
+  for (const enemy of game.combat.enemies()) defeat(game, enemy);
+  assert.match(game.objectiveTarget().label, /Gold beacon/);
 });

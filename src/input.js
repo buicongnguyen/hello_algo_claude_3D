@@ -3,18 +3,27 @@ export class InputController {
     this.keys = new Set();
     this.actions = new Set();
     this.touch = { x: 0, y: 0 };
+    this.firePointers = new Set();
     this.enabled = false;
     this.bindKeyboard();
     this.bindTouch();
+    const canvas = document.querySelector("#game");
+    canvas?.addEventListener("pointerdown", event => {
+      if (!this.enabled || event.button !== 0 || event.pointerType !== "mouse") return;
+      canvas.setPointerCapture(event.pointerId); this.firePointers.add(event.pointerId);
+    });
+    for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) canvas?.addEventListener(name, event => this.firePointers.delete(event.pointerId));
   }
 
   bindKeyboard() {
     window.addEventListener("keydown", event => {
-      if (!this.enabled) return;
+      if (!this.enabled || event.ctrlKey || event.metaKey || event.altKey) return;
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Enter"].includes(event.code)) event.preventDefault();
       this.keys.add(event.code);
       if (!event.repeat) {
-        if (["KeyQ", "Space"].includes(event.code)) this.actions.add("pulse");
+        if (event.code === "KeyQ") this.actions.add("pulse");
+        if (event.code === "KeyF") this.actions.add("freeze");
+        if (event.code === "KeyR") this.actions.add("call");
         if (["ShiftLeft", "ShiftRight"].includes(event.code)) this.actions.add("dash");
         if (["KeyE", "Enter"].includes(event.code)) this.actions.add("interact");
         if (event.code === "Escape") this.actions.add("pause");
@@ -50,10 +59,15 @@ export class InputController {
     };
     joystick?.addEventListener("pointerup", release);
     joystick?.addEventListener("pointercancel", release);
-    document.querySelectorAll("[data-touch]").forEach(button => button.addEventListener("pointerdown", event => {
-      event.preventDefault();
-      if (this.enabled) this.actions.add(button.dataset.touch);
-    }));
+    document.querySelectorAll("[data-touch]").forEach(button => {
+      button.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        if (!this.enabled) return;
+        if (button.dataset.touch === "shoot") { button.setPointerCapture(event.pointerId); this.firePointers.add(event.pointerId); }
+        else this.actions.add(button.dataset.touch);
+      });
+      for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) button.addEventListener(name, event => this.firePointers.delete(event.pointerId));
+    });
   }
 
   movement() {
@@ -73,9 +87,12 @@ export class InputController {
     return true;
   }
 
+  held(action) { return this.enabled && action === "shoot" && (this.keys.has("Space") || this.keys.has("KeyJ") || this.firePointers.size > 0); }
+
   clear() {
     this.actions.clear();
     this.keys.clear();
+    this.firePointers.clear();
     this.touch.x = 0; this.touch.y = 0;
     if (this.pointerId != null && this.joystick?.hasPointerCapture(this.pointerId)) this.joystick.releasePointerCapture(this.pointerId);
     this.pointerId = null;

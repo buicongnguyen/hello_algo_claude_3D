@@ -110,6 +110,16 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
 .world-prompt { position: absolute; left: 50%; bottom: 100px; transform: translateX(-50%); padding: 11px 16px; border-radius: 13px; background: var(--cream); color: var(--navy); box-shadow: 0 9px 35px rgba(0,0,0,.25); font-size: 12px; font-weight: 900; letter-spacing: .05em; }
 .message { position: absolute; left: 50%; top: 95px; transform: translateX(-50%); max-width: min(520px, 80vw); padding: 10px 16px; border-radius: 13px; background: rgba(7,42,67,.9); border: 1px solid var(--cyan); text-align: center; font-size: 13px; font-weight: 800; }
 .message.bad { border-color: var(--coral); color: #ffc2b8; }
+.combat-panel { position: absolute; top: 121px; left: 18px; display: grid; gap: 6px; padding: 14px 17px; border-radius: 18px; max-width: 310px; }
+.combat-panel strong { color: var(--gold); font-size: 17px; }
+.combat-panel span { font-size: 12px; color: #d8f5ff; }
+.combat-panel small { font-size: 11px; color: #9ee8c4; }
+.touch-controls:not(.combat-active) .combat-only { display: none; }
+.touch-controls.combat-active .touch-actions { grid-template-columns: repeat(3, 58px); gap: 7px; }
+.touch-controls.combat-active .touch-actions button { grid-row: auto; min-height: 54px; border-radius: 18px; touch-action: none; }
+.touch-controls.combat-active [data-touch="shoot"] { color: var(--navy); background: var(--gold); }
+.touch-controls.combat-active [data-touch="freeze"] { border-color: var(--cyan); }
+.touch-controls.combat-active [data-touch="call"] { border-color: var(--green); }
 .navigation { position: absolute; left: 50%; bottom: 88px; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; padding: 9px 14px; border-radius: 14px; max-width: calc(100vw - 28px); }
 .navigation > span { color: var(--gold); font-size: 25px; line-height: 1; }
 .navigation strong { font-size: 12px; }
@@ -169,12 +179,23 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
   .stage-dots button { min-height: 82px; grid-template-columns: auto 1fr; align-items: center; }
   .stage-dots button small { grid-column: 2; }
   .mission-card { left: 9px; top: 9px; width: calc(100vw - 165px); padding: 10px 12px; }
+  .combat-active .mission-card { width: calc(100vw - 180px); }
   .mission-card strong { font-size: 14px; }
   .status-card { top: 9px; right: 9px; padding: 5px 5px 5px 9px; gap: 7px; }
   .status-card > span { display: block; font-size: 9px; letter-spacing: 0; }
   .status-card .icon-button { width: 42px; min-width: 42px; min-height: 42px; }
   .progress-card { top: 67px; min-width: 126px; padding: 8px 12px; }
   .message { top: 112px; }
+  .combat-active .combat-panel { left: 9px; top: 112px; padding: 9px 12px; width: calc(100% - 18px); max-width: none; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
+  .combat-panel strong { font-size: 14px; }
+  .combat-panel span { font-size: 10px; }
+  .combat-panel small { font-size: 10px; }
+  .combat-panel small:last-child { grid-column: 1 / -1; }
+  .combat-active .message { top: 208px; }
+  #app:has(.hud.combat-active:not(.hidden)) .dialogue { top: 264px; }
+  .touch-controls.combat-active .touch-actions { right: 10px; grid-template-columns: repeat(3, 54px); }
+  .touch-controls.combat-active .joystick { left: 10px; width: 94px; height: 94px; }
+  .touch-controls.combat-active .joystick i { left: 25px; top: 25px; }
   .abilities { bottom: 9px; padding: 5px; }
   .abilities > div { min-width: 68px; padding: 6px; }
   .abilities span { font-size: 10px; }
@@ -214,6 +235,12 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
   .touch-actions { bottom: 8px; grid-template-columns: repeat(2, 56px); }
   .touch-actions button { min-height: 48px; }
   .touch-actions button:first-child { min-height: 105px; }
+  .combat-panel { top: 88px; left: 12px; max-width: 285px; padding: 9px 12px; gap: 4px; }
+  #app:has(.hud.combat-active:not(.hidden)) .dialogue { left: auto; right: 12px; top: 85px; width: 285px; }
+  .touch-controls.combat-active .touch-actions button { min-height: 48px; }
+  .combat-active .abilities { display: none; }
+  .combat-active .navigation { bottom: 16px; max-width: 340px; }
+  .combat-active .world-prompt { bottom: 72px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

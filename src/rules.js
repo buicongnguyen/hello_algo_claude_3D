@@ -10,6 +10,7 @@ export function createProgress(raw = {}) {
   if (!raw || typeof raw !== "object") raw = {};
   return {
     version: SAVE_VERSION,
+    brawlBest: Number.isFinite(raw.brawlBest) ? Math.max(0, raw.brawlBest) : 0,
     completed: Array.isArray(raw.completed) ? [...new Set(raw.completed.filter(value => typeof value === "string"))] : [],
     results: raw.results && typeof raw.results === "object" ? { ...raw.results } : {},
     settings: { quality: "auto", reducedMotion: false, ...(raw.settings || {}) },

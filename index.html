@@ -23,9 +23,10 @@
         <div class="title-card glass">
           <p class="eyebrow">A Robot Beach story</p>
           <h1 id="gameTitle"><span>Signal</span>break</h1>
-          <p class="tagline">Recover the Aurora fragments. Rescue the shore. Relight the sky.</p>
+          <p class="tagline">Crash a zombie robot beach party. Grab silly weapons. Build a tiny team.</p>
           <div class="button-stack">
-            <button id="continueButton" class="primary">Begin journey</button>
+            <button id="brawlButton" class="primary">Beach Brawl · Play now</button>
+            <button id="continueButton">Begin journey</button>
             <button id="missionsButton">Mission map</button>
             <button id="howButton" class="quiet">How to play</button>
             <button id="roamButton" class="hidden">Explore restored island</button>
@@ -65,6 +66,7 @@
         <div class="status-card glass"><span id="hudShield">◆◆</span><div><small>TIME</small><strong id="hudTime">60</strong></div><button id="pauseButton" class="icon-button" aria-label="Pause">Ⅱ</button></div>
         <div id="prompt" class="world-prompt hidden">E · INTERACT</div>
         <div id="message" class="message hidden" role="status"></div>
+        <div id="combatPanel" class="combat-panel glass hidden"><strong id="weaponName"></strong><span id="weaponAmmo"></span><span id="gadgetCount"></span><small id="teamCount"></small><small>E / Use · repair a downed bot for 2 scrap</small></div>
         <div id="navigation" class="navigation glass hidden"><span id="navArrow" aria-hidden="true">↑</span><strong id="navLabel"></strong><small id="navDistance"></small></div>
         <div class="abilities glass"><div><kbd>Q</kbd><span>Pulse</span><i id="pulseMeter"></i></div><div><kbd>Shift</kbd><span>Dash</span><i id="dashMeter"></i></div><div><kbd>E</kbd><span>Interact</span></div></div>
         <div class="crosshair" aria-hidden="true"></div>
@@ -79,12 +81,12 @@
       </section>
 
       <section id="helpPanel" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
-        <div class="modal-card glass help-card"><p class="eyebrow">Field manual</p><h2 id="helpTitle">Ready for the shore?</h2><div class="help-grid"><p><kbd>WASD</kbd><strong>Move</strong><span>Camera-relative movement</span></p><p><kbd>Q</kbd><strong>Pulse</strong><span>Scan, activate and disable</span></p><p><kbd>Shift</kbd><strong>Dash</strong><span>Evade danger quickly</span></p><p><kbd>E</kbd><strong>Interact</strong><span>Repair, carry and place</span></p></div><p>Earn medals for completion, finishing with 25% time left, and keeping two shields without a wrong scan. Chapter upgrades stay with you on replays.</p><label><input id="soundEnabled" type="checkbox" checked /> Sound effects</label><label><input id="reducedMotion" type="checkbox" /> Reduced motion</label><label>Quality <select id="quality"><option value="auto">Auto</option><option value="low">Low</option><option value="high">High</option></select></label><button id="closeHelp" class="primary">Ready</button></div>
+        <div class="modal-card glass help-card"><p class="eyebrow">Field manual</p><h2 id="helpTitle">Ready for the shore?</h2><div class="help-grid"><p><kbd>WASD</kbd><strong>Move</strong><span>Camera-relative movement</span></p><p><kbd>Q</kbd><strong>Pulse</strong><span>Unlimited close-range tool</span></p><p><kbd>Space</kbd><strong>Fire</strong><span>Hold Space, J or mouse; auto-aim</span></p><p><kbd>Shift</kbd><strong>Dash</strong><span>Evade red attack warnings</span></p><p><kbd>F</kbd><strong>Freeze Pop</strong><span>Freeze a nearby group</span></p><p><kbd>R</kbd><strong>Crab crew</strong><span>14 seconds of pinching help</span></p><p><kbd>E</kbd><strong>Use / repair</strong><span>2 scrap recruits a downed bot</span></p></div><p>Walk over loot to collect it. Weapons auto-aim at the closest enemy; an empty weapon never removes your Q pulse. Boss shields still require a dodged charge. Story medals reward speed, two remaining shields and correct scans.</p><label><input id="soundEnabled" type="checkbox" checked /> Sound effects</label><label><input id="reducedMotion" type="checkbox" /> Reduced motion</label><label>Quality <select id="quality"><option value="auto">Auto</option><option value="low">Low</option><option value="high">High</option></select></label><button id="closeHelp" class="primary">Ready</button></div>
       </section>
 
       <div id="touchControls" class="touch-controls hidden" aria-label="Touch controls">
         <div id="joystick" class="joystick"><i></i></div>
-        <div class="touch-actions"><button data-touch="pulse">Pulse</button><button data-touch="dash">Dash</button><button data-touch="interact">Use</button></div>
+        <div class="touch-actions"><button data-touch="shoot" class="combat-only">Fire</button><button data-touch="pulse">Pulse</button><button data-touch="dash">Dash</button><button data-touch="interact">Use</button><button data-touch="freeze" id="touchFreeze" class="combat-only">Freeze 0</button><button data-touch="call" id="touchCall" class="combat-only">Call 0</button></div>
       </div>
     </main>
     <script type="module" src="/src/main.js"></script>

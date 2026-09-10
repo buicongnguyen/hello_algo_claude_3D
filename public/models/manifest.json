@@ -11,8 +11,20 @@
     {
       "name": "bolt",
       "file": "bolt.glb",
-      "bytes": 44440,
+      "bytes": 44752,
       "meshFaces": 108
+    },
+    {
+      "name": "zombie_dog",
+      "file": "zombie_dog.glb",
+      "bytes": 48800,
+      "meshFaces": 124
+    },
+    {
+      "name": "rust_drone",
+      "file": "rust_drone.glb",
+      "bytes": 92496,
+      "meshFaces": 190
     },
     {
       "name": "rust_scout",
@@ -23,7 +35,7 @@
     {
       "name": "lighthouse",
       "file": "lighthouse.glb",
-      "bytes": 48300,
+      "bytes": 48304,
       "meshFaces": 262
     },
     {

@@ -4,7 +4,7 @@ import { InputController } from "./input.js";
 import { UI } from "./ui.js";
 import { Game } from "./game.js";
 import { createProgress, earnedUpgrades, nextIncomplete } from "./rules.js";
-import { ALL_STAGES } from "./missions.js";
+import { ALL_STAGES, BRAWL } from "./missions.js";
 import { Sound } from "./sound.js";
 
 const STORAGE_KEY = "robot-beach-3d-signalbreak-v1";
@@ -30,6 +30,7 @@ let ui;
 
 ui = new UI(progress, {
   continue: () => ui.showBriefing(nextIncomplete(progress)),
+  brawl: () => ui.showBriefing(BRAWL),
   launch: item => { sound.unlock(); game.begin(item); },
   sound: kind => sound.play(kind),
   roam: () => {
@@ -89,4 +90,4 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden && game.running && !game.paused) game.pause();
 });
 
-window.__ROBOT_BEACH__ = { world, game, ui, input, catalog: ALL_STAGES };
+window.__ROBOT_BEACH__ = { world, game, ui, input, catalog: ALL_STAGES, brawl: BRAWL };

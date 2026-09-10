@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { applyHit, earnedUpgrades, recordResult, sequenceStep } from "./rules.js";
+import { Combat } from "./combat.js";
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -58,6 +59,7 @@ export class Game {
     this.player.object.rotation.y = Math.PI;
     this.lastMove = { x: -Math.sin(this.world.cameraYaw || 0), z: -Math.cos(this.world.cameraYaw || 0) };
     this.setupMission();
+    this.combat = new Combat(this);
     this.ui.showGame(item);
     this.running = true;
     this.paused = false;
@@ -190,12 +192,19 @@ export class Game {
   spawnEnemy(boss = false, index = 0, health = boss ? 12 : 2) {
     const angle = index * 2.31 + 0.6;
     const radius = boss ? 10 : 14 + (index % 3);
-    const position = this.stage.type === "defense" && !boss
+    let position = this.stage.type === "defense" && !boss
       ? this.approaches[index % this.approaches.length]
       : this.stage.type === "combat" ? this.stage.positions[index] : { x: Math.cos(angle) * radius, z: Math.sin(angle) * radius };
-    const enemy = this.makeEntity(boss ? "boss" : "enemy", "rust_scout", position, boss ? 1.24 : 0.68, { health, maxHealth: health, speed: boss ? 3.7 : 2.15 + (index % 3) * 0.2, boss, hitFlash: 0 });
+    if (this.stage.type === "brawl" && distance(position, this.player) < 8) position = { x: -position.x, z: -position.z };
+    const variant = boss ? "captain" : ["bot", "dog", "drone"][index % 3];
+    const model = variant === "dog" ? "zombie_dog" : variant === "drone" ? "rust_drone" : "rust_scout";
+    const enemy = this.makeEntity(boss ? "boss" : "enemy", model, position, boss ? 1.24 : variant === "bot" ? 0.56 : 0.78, { health, maxHealth: health, speed: boss ? 3.7 : variant === "dog" ? 3.4 : 2.4, boss, variant, attackState: "approach", attackTime: 0, frozen: 0 });
     if (this.stage.type === "defense" && this.stage.id === "approaches") { enemy.health = 3; enemy.maxHealth = 3; enemy.speed = 2.8; }
     this.cloneMaterials(enemy.object);
+    enemy.healthBar = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xff745c, depthTest: false }));
+    enemy.healthBar.scale.set(1.5, 0.13, 1);
+    enemy.healthBar.position.y = variant === "drone" ? 1.35 : variant === "dog" ? 1.8 : 3.2;
+    enemy.object.add(enemy.healthBar);
     this.entities.push(enemy);
     return enemy;
   }
@@ -260,6 +269,13 @@ export class Game {
     this.updatePlayer(dt);
     this.updateHazards(dt);
     if (this.shields <= 0) return this.finish(false, "KAI's shield is empty. Dash away from red warning zones and try again.");
+    this.combat.update(dt);
+    if (!this.running) return;
+    if (this.input.consume("freeze")) this.combat.freeze();
+    if (this.input.consume("call")) this.combat.callAnimals();
+    if (this.input.held?.("shoot") || this.input.consume("shoot")) this.combat.shoot();
+    if (!this.running) return;
+    if (this.input.consume("dash")) this.dash();
     this.updateMission(dt);
     if (!this.running) return;
     if (this.shields <= 0) return this.finish(false, "KAI's shield is empty. Dash away from red warning zones and try again.");
@@ -268,7 +284,6 @@ export class Game {
 
     if (this.input.consume("pulse")) this.pulse();
     if (!this.running) return;
-    if (this.input.consume("dash")) this.dash();
     if (this.input.consume("interact")) this.interact();
   }
 
@@ -309,7 +324,7 @@ export class Game {
       });
     }
     if (this.stage.type === "rescue") this.updateTide(dt);
-    if (["combat", "defense", "boss", "finale", "collect"].includes(this.stage.type)) this.updateEnemies(dt);
+    if (["combat", "defense", "boss", "finale", "collect", "brawl"].includes(this.stage.type)) this.updateEnemies(dt);
     if (!this.running) return;
     if (this.shields <= 0) return this.finish(false, "KAI's shield is empty. Protect yourself as well as the relay.");
     if (this.stage.type === "defense") this.updateDefense(dt);
@@ -335,28 +350,22 @@ export class Game {
   updateEnemies(dt) {
     for (const enemy of this.entities.filter(entity => ["enemy", "boss"].includes(entity.kind) && entity.active)) {
       if (enemy.boss) continue;
+      if (enemy.frozen > 0) continue;
       const target = this.stage.type === "defense" ? this.relay : this.stage.type === "finale" ? this.core : this.player;
       if (!target) continue;
-      const d = distance(enemy, target) || 1;
-      enemy.x += ((target.x - enemy.x) / d) * enemy.speed * dt;
-      enemy.z += ((target.z - enemy.z) / d) * enemy.speed * dt;
-      enemy.object.position.set(enemy.x, 0.55, enemy.z);
-      enemy.object.rotation.y = Math.atan2(target.x - enemy.x, target.z - enemy.z);
-      this.world.animateActor?.(enemy.object, this.elapsed + enemy.x, true);
-      if (distance(enemy, this.player) < 1.35) {
+      const attacking = this.combat.moveEnemy(enemy, target, dt);
+      if (attacking && distance(enemy, this.player) < 1.35) {
         this.damagePlayer();
-        enemy.x += (enemy.x - this.player.x) / d * 2;
-        enemy.z += (enemy.z - this.player.z) / d * 2;
       }
       if (this.stage.type === "defense" && distance(enemy, this.relay) < 1.4) {
-        this.disableEntity(enemy, false);
+        this.disableEntity(enemy, false, false);
         this.escaped += 1;
         this.shields = Math.max(0, this.shields - 1);
         this.invulnerable = 0;
         this.ui.message("A scout reached the relay!", true);
       }
       if (this.stage.type === "finale" && this.core && distance(enemy, this.core) < 1.5) {
-        this.disableEntity(enemy, false);
+        this.disableEntity(enemy, false, false);
         this.core.health -= 1;
         this.ui.message(`Core integrity ${this.core.health} / 5`, true);
         if (this.core.health <= 0) return this.finish(false, "The Warden overwhelmed the Aurora Core. Use pulse and dash to intercept scouts earlier.");
@@ -378,9 +387,8 @@ export class Game {
       if (target && turret.cooldown <= 0) {
         turret.object.rotation.y = Math.atan2(target.x - turret.x, target.z - turret.z);
         turret.cooldown = 0.8;
-        target.health -= 1;
-        this.world.pulse(target, 0.55, 0xffd166);
-        if (target.health <= 0) this.disableEntity(target);
+        this.combat.makeBolt([turret, target], 0xffd166);
+        this.combat.hit(target, 1);
       }
     }
     if (this.spawned >= this.stage.count && !this.entities.some(entity => entity.kind === "enemy" && entity.active)) {
@@ -391,6 +399,7 @@ export class Game {
 
   updateBoss(dt, boss) {
     if (!boss?.active) return;
+    if (boss.frozen > 0) return;
     boss.stateTime -= dt;
     if (boss.state === "shielded" && boss.stateTime <= 0) {
       boss.state = "warning";
@@ -503,11 +512,8 @@ export class Game {
           this.ui.message("The shield is solid—bait a charge first", true);
           continue;
         }
-        entity.health -= damage;
         hits += 1;
-        this.world.pulse(entity, 0.45, 0xffd166);
-        if (entity.health <= 0) this.disableEntity(entity, ["combat", "defense", "finale"].includes(this.stage.type));
-        else this.ui.message(`${entity.boss ? "Warden" : "Scout"} core ${entity.health} / ${entity.maxHealth}`);
+        this.combat.hit(entity, damage);
       }
     }
     if (!hits) this.ui.message("No pulse target in range", true);
@@ -575,6 +581,7 @@ export class Game {
       this.world.launchRocket?.();
       return;
     }
+    if (this.combat.repair()) return;
     this.ui.message("Move closer to the highlighted target", true);
   }
 
@@ -615,12 +622,14 @@ export class Game {
     }
   }
 
-  disableEntity(entity, count = true) {
+  disableEntity(entity, count = true, defeated = true) {
     if (!entity.active) return;
     entity.active = false;
     entity.object.scale.multiplyScalar(entity.boss ? 0.82 : 0.92);
+    if (entity.healthBar) entity.healthBar.visible = false;
     this.tint(entity.object, 0x4bd6c4, 0.8);
     this.world.animateActor?.(entity.object, 0, false);
+    this.combat?.onDisabled(entity, defeated);
     if (count) this.progressCount += 1;
     if (entity.kind === "boss") {
       if (this.stage.type === "boss") this.finish(true, "The Rust Captain rebooted peacefully and released the third fragment.");
@@ -652,10 +661,12 @@ export class Game {
     else if (this.stage.type === "defense" && this.phase === "ready") text = "E · START DEFENSE WAVE";
     else if (this.goal && distance(this.player, this.goal) < 2.2) text = this.goal.locked ? (this.stage.type === "combat" ? "REBOOT THE REMAINING SCOUTS" : "BEACON NEEDS MORE ENERGY") : "E · REPAIR BEACON";
     else if (this.stage.type === "finale" && this.phase === "launch" && distance(this.player, this.rocketGoal) < 3) text = "E · LAUNCH FESTIVAL ROCKET";
+    if (!text && this.combat.repairTarget()) text = "E · REPAIR TEAMMATE · 2 SCRAP";
     this.ui.prompt(text);
   }
 
   progressText() {
+    if (this.stage.type === "brawl") return `Wave ${Math.max(1, this.combat.wave)} / 3 · ${this.combat.kills} / 24`;
     if (this.stage.type === "roam") return "Island restored";
     if (this.stage.type === "defense" && this.phase === "ready") return "Ready · press E";
     if (this.stage.type === "defense") return this.phase === "prepare" ? `${this.progressCount} / ${this.stage.pads} turrets` : `${this.progressCount} / ${this.stage.count} scouts`;
@@ -681,12 +692,15 @@ export class Game {
       untimed: ["prepare", "ready"].includes(this.phase) || this.stage.type === "roam",
       pulseReady: 1 - clamp(this.pulseCooldown / 1.1, 0, 1),
       dashReady: 1 - clamp(this.dashCooldown / this.upgrades.dashRecharge, 0, 1),
+      combat: this.combat,
     });
     const target = this.objectiveTarget();
     this.ui.navigation?.(target, this.player, this.world.cameraYaw || 0);
   }
 
   objectiveTarget() {
+    const combatTarget = this.combat.objective();
+    if (combatTarget) return combatTarget;
     const nearest = (entities, label) => {
       const entity = entities.filter(entity => entity.active !== false).sort((a, b) => distance(this.player, a) - distance(this.player, b))[0];
       return entity ? { ...entity, label } : null;
@@ -729,6 +743,17 @@ export class Game {
     this.input.clear();
     this.ui.hideDialogue?.();
     this.ui.prompt("");
+    if (won && this.stage.type === "brawl") {
+      const allies = this.entities.filter(e => e.kind === "ally").length;
+      const score = this.combat.kills * 100 + allies * 200 + this.shields * 50 + Math.max(0, Math.floor(this.time)) * 10;
+      this.progress.brawlBest = Math.max(this.progress.brawlBest || 0, score);
+      this.save(this.progress);
+      this.ui.modal({ icon: "✦", eyebrow: "Brawl won", title: "Tiny heroes. Big beach party.", text, stats: [[score, "score"], [allies, "robot pals"], [this.progress.brawlBest, "best"]], actions: [
+        { label: "Play again", run: () => this.begin(this.item) },
+        { label: "Back to title", run: () => { this.stop(); this.ui.showTitle(); } },
+      ] });
+      return;
+    }
     if (won) {
       const challenge = this.shields >= 2 && this.wrongActions === 0;
       this.progress = recordResult(this.progress, this.item.chapter, this.stage, Math.max(0, this.time), challenge);
