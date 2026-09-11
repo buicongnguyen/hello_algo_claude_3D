@@ -29,108 +29,102 @@ try {
   page.on("console", message => { if (message.type() === "error" && /THREE|WebGL|shader/i.test(message.text())) errors.push(message.text()); });
   await page.goto(URL, { waitUntil: "networkidle" });
   await page.locator("#gameTitle").waitFor({ state: "visible" });
+  assert.equal(await page.evaluate(()=>window.__ROBOT_BEACH__.world.models.size),42);
   await page.locator("#continueButton").click();
-  assert.equal(await page.locator("#campaignModeSelect").inputValue(), "story");
-  assert.match(await page.locator("#briefLocation").textContent(), /Breakwater Marina/);
-  assert.equal(await page.locator("#briefBeats li").count(), 2);
-  await page.screenshot({ path: join(OUT, "01-briefing-desktop.png") });
+  assert.equal(await page.locator("#campaignModeSelect").inputValue(),"story");
+  assert.match(await page.locator("#briefLocation").textContent(),/Meridian City/);
+  assert.equal(await page.locator("#briefBeats li").count(),2);
+  await page.screenshot({path:join(OUT,"01-briefing-desktop.png")});
   await page.locator("#campaignModeSelect").selectOption("challenge");
-  assert.match(await page.locator("#briefPace").textContent(), /Timed mission: 85 seconds/);
+  assert.match(await page.locator("#briefPace").textContent(),/Timed mission: 85 seconds/);
   await page.locator("#campaignModeSelect").selectOption("story");
-  await page.setViewportSize({ width: 390, height: 844 });
-  const launchBounds = await page.locator("#launchButton").boundingBox();
-  assert.ok(launchBounds.y >= 0 && launchBounds.y + launchBounds.height <= 844, "mission launch stays visible on a phone");
-  await page.screenshot({ path: join(OUT, "02-briefing-portrait.png") });
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.setViewportSize({width:390,height:844});
+  const launch=await page.locator("#launchButton").boundingBox();
+  assert.ok(launch.y>=0 && launch.y+launch.height<=844);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.screenshot({path:join(OUT,"02-briefing-portrait.png")});
   await page.locator("#launchButton").click();
-  assert.equal(await page.locator("#speakerName").textContent(), "LUMA");
-  await page.locator("#nextDialogue").focus();
-  await page.keyboard.press("Enter");
-  assert.equal(await page.locator("#speakerName").textContent(), "BOLT");
+  assert.equal(await page.locator("#speakerName").textContent(),"LUMA");
   await page.locator("#nextDialogue").click();
-  assert.equal(await page.locator("#dialogue").isVisible(), false);
-  await page.setViewportSize({ width: 1440, height: 900 });
-
-  const districtReports = [];
-  for (const id of ["trail", "split-current", "approaches", "storm", "core"]) {
-    districtReports.push(await page.evaluate(id => {
-      const { game, world, ui, catalog } = window.__ROBOT_BEACH__;
-      const item = catalog.find(item => item.stage.id === id);
-      game.begin(item); game.paused = true; ui.hideDialogue(); game.updateHUD(.1);
-      world.update(.05, game.player, true);
-      return { district: world.mission.getObjectByName(`District_${item.chapter.id}`)?.name,
-        sky: world.scene.background.getHex(), calls: world.renderer.info.render.calls, triangles: world.renderer.info.render.triangles,
-        shelters: game.shelters.length, gates: game.gates.length };
-    }, id));
-    await page.screenshot({ path: join(OUT, `03-district-${id}.png`) });
+  assert.equal(await page.locator("#speakerName").textContent(),"BOLT");
+  await page.locator("#nextDialogue").click();
+  await page.setViewportSize({width:1440,height:900});
+  const ids=await page.evaluate(()=>window.__ROBOT_BEACH__.catalog.map(i=>i.stage.id)), reports=[];
+  for(const id of ids) {
+    const report=await page.evaluate(id=>{
+      const {game,world,ui,catalog}=window.__ROBOT_BEACH__,item=catalog.find(i=>i.stage.id===id);
+      game.begin(item);game.paused=true;ui.hideDialogue();game.updateHUD(.1);
+      world.update(.05,game.player,true);
+      return {id,scene:world.journeyRoot?.name,shared:world.shared.visible,sky:world.scene.background.getHex(),calls:world.renderer.info.render.calls,triangles:world.renderer.info.render.triangles,failed:world.failedModels};
+    },id);
+    reports.push(report);
+    await page.screenshot({path:join(OUT,"scene-"+id+".png")});
   }
-  assert.ok(districtReports.every(report => report.district && report.calls <= 450 && report.triangles <= 400000));
-  assert.equal(new Set(districtReports.map(report => report.sky)).size, 5);
-  assert.equal(districtReports[1].shelters, 2);
-  assert.equal(districtReports[3].gates, 8);
-  console.log("District rendering checks:", JSON.stringify(districtReports));
-
-  const relay = await page.evaluate(() => {
-    const { game, catalog } = window.__ROBOT_BEACH__;
-    game.begin(catalog.find(item => item.stage.id === "trail")); game.paused = true;
-    // Solve from the receiver backward; use the same nearby interaction as the UI.
-    for (const node of [...game.relayNodes].reverse()) {
-      const next = game.relayNodes[node.id + 1] || game.stage.receiver;
-      const dx = next.x - node.x, dz = next.z - node.z;
-      const desired = dx > 0 ? 1 : dx < 0 ? 3 : dz > 0 ? 2 : 0;
-      game.player.x = node.x; game.player.z = node.z;
-      while (node.turn !== desired) game.interact();
+  assert.equal(new Set(reports.map(r=>r.scene)).size,15);
+  assert.equal(new Set(reports.map(r=>r.sky)).size,15);
+  assert.ok(reports.every(r=>r.scene && !r.shared && r.calls<=450 && r.triangles<=400000 && !r.failed.length));
+  console.log("Journey rendering:",JSON.stringify(reports));
+  const relay=await page.evaluate(()=>{
+    const {game,catalog,ui}=window.__ROBOT_BEACH__;
+    game.begin(catalog[1]);game.paused=true;ui.hideDialogue();
+    for(const node of [...game.relayNodes].reverse()) {
+      const next=game.relayNodes[node.id+1] || game.stage.receiver;
+      const dx=next.x-node.x,dz=next.z-node.z,desired=dx>0?1:dx<0?3:dz>0?2:0;
+      game.player.x=node.x;game.player.z=node.z;
+      for(let i=0;node.turn!==desired && i<4;i++) game.interact();
     }
-    return { complete: game.relayState.complete, saved: game.progress.completed.includes("signal:trail"), outcome: document.querySelector("#departureStory").textContent };
+    return {complete:game.relayState.complete,saved:game.progress.completed.includes("signal:trail"),outcome:document.querySelector("#departureStory").textContent};
   });
-  assert.ok(relay.complete && relay.saved);
-  assert.match(relay.outcome, /SUNDOWN/);
-  await page.screenshot({ path: join(OUT, "04-story-departure.png") });
-  await page.evaluate(() => { const { game, ui } = window.__ROBOT_BEACH__; game.completeVictory(); game.stop(); ui.showTitle(); ui.showJournal(); });
-  assert.match(await page.locator("#modalText").textContent(), /SUNDOWN/);
-  assert.doesNotMatch(await page.locator("#modalText").textContent(), /Protection protocol revised/);
-  await page.screenshot({ path: join(OUT, "05-journal.png") });
-
-  await page.evaluate(() => {
-    const { game, catalog, ui } = window.__ROBOT_BEACH__;
-    game.progress.completed = catalog.slice(0, -1).map(item => `${item.chapter.id}:${item.stage.id}`);
-    game.begin(catalog.at(-1)); game.paused = true;
-    game.core.health = 3; game.metrics.damageTaken = 2; game.spawned = game.finalWaveCount;
-    game.updateFinale(0); ui.hideDialogue();
+  assert.ok(relay.complete && relay.saved);assert.match(relay.outcome,/coastal survey/);
+  assert.match(await page.locator("#nextDestination").textContent(),/Amber Strand/);
+  await page.screenshot({path:join(OUT,"04-discovery-departure.png")});
+  await page.evaluate(()=>{const {game,ui}=window.__ROBOT_BEACH__;game.completeVictory();game.stop();ui.showTitle();ui.showJournal();});
+  assert.match(await page.locator("#modalText").textContent(),/coastal frequency/);
+  assert.doesNotMatch(await page.locator("#modalText").textContent(),/KAI brought home more/);
+  const newActions=await page.evaluate(()=>{
+    const {game,catalog,ui}=window.__ROBOT_BEACH__,results=[];
+    for(const id of ["split-current","storm","approaches","signalbreak"]) {
+      game.begin(catalog.find(i=>i.stage.id===id));game.paused=true;ui.hideDialogue();
+      const move=t=>{game.player.x=t.x;game.player.z=t.z;};
+      if(game.discovery.targets) for(const target of game.discovery.targets){move(target);game.interact();}
+      else if(game.discovery.buoy) for(let t=0;t<600 && game.running;t++){move(game.discovery.buoy);game.discovery.update(.1);}
+      else {move(game.discovery.terminal);game.interact();}
+      results.push({id,won:!game.running,saved:game.progress.completed.some(key=>key.endsWith(":"+id))});
+      if(id!=="signalbreak") game.completeVictory();
+    }
+    return results;
   });
-  await page.reload({ waitUntil: "networkidle" });
-  await page.locator("#resumeCheckpoint").waitFor({ state: "visible" });
-  await page.locator("#resumeCheckpoint").click();
-  const checkpoint = await page.evaluate(() => {
-    const { game, ui } = window.__ROBOT_BEACH__; game.paused = true; ui.hideDialogue();
-    return { phase: game.phase, core: game.core.health, damage: game.metrics.damageTaken, ammo: game.combat.ammo };
+  assert.ok(newActions.every(r=>r.won && r.saved));
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:join(OUT,"05-homecoming-portrait.png")});
+  await page.reload({waitUntil:"networkidle"});
+  await page.locator("#gameTitle").waitFor({state:"visible"});
+  assert.ok(await page.evaluate(()=>window.__ROBOT_BEACH__.game.progress.completed.includes("siege:signalbreak")));
+  // A second context exercises actual localStorage migration, not just the pure normalizer.
+  const legacy=await browser.newPage({viewport:{width:390,height:844}});
+  await legacy.addInitScript(()=>{
+    if(!localStorage.getItem("migration-seeded")) {
+      localStorage.setItem("migration-seeded","yes");
+      localStorage.setItem("robot-beach-3d-signalbreak-v1",JSON.stringify({version:1,completed:["signal:wake"],results:{"signal:wake":{medals:3,bestTimeLeft:80}},brawlBest:99}));
+    }
   });
-  assert.deepEqual(checkpoint, { phase: "warden", core: 3, damage: 2, ammo: 36 });
-  await page.evaluate(() => {
-    const { game, world, ui } = window.__ROBOT_BEACH__;
-    game.disableEntity(game.boss, false); game.updateFinale(0);
-    game.player.x = game.wardenRepair.x + 2; game.player.z = game.wardenRepair.z;
-    game.player.object.position.set(game.player.x, .55, game.player.z);
-    game.updatePrompt(); game.updateHUD(.1); ui.hideDialogue();
-    world.update(.05, game.player, true);
+  await legacy.goto(URL,{waitUntil:"networkidle"});await legacy.locator("#migrationNote").waitFor({state:"visible"});
+  assert.equal(await legacy.locator("#campaignCount").textContent(),"0 / 15");
+  const migration=await legacy.evaluate(()=>window.__ROBOT_BEACH__.game.progress);
+  assert.equal(migration.previousCampaign.results["signal:wake"].medals,3);assert.equal(migration.brawlBest,99);
+  await legacy.locator("#missionsButton").click();
+  assert.equal(await legacy.locator(".stage-dots button:not(:disabled)").count(),1);
+  assert.equal(await legacy.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  const alignment=await legacy.locator(".stage-dots button").first().evaluate(button=>{
+    const title=button.querySelector("strong").getBoundingClientRect(),location=button.querySelector("em").getBoundingClientRect();
+    return Math.abs(title.x-location.x)<1 && location.y>=title.bottom;
   });
-  assert.match(await page.locator("#prompt").textContent(), /FREE REPAIR/);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: join(OUT, "06-warden-repair-portrait.png") });
-  await page.evaluate(() => {
-    const { game } = window.__ROBOT_BEACH__;
-    game.combat.scrap = 0; game.interact();
-    game.player.x = game.rocketGoal.x; game.player.z = game.rocketGoal.z; game.interact();
-  });
-  assert.match(await page.locator("#departureStory").textContent(), /Protection protocol revised/);
-  await page.screenshot({ path: join(OUT, "07-festival-portrait.png") });
-  await page.reload({ waitUntil: "networkidle" });
-  await page.locator("#gameTitle").waitFor({ state: "visible" });
-  assert.equal(await page.locator("#resumeCheckpoint").isVisible(), false);
-  assert.ok(await page.evaluate(() => window.__ROBOT_BEACH__.game.progress.completed.includes("siege:signalbreak")));
-  assert.deepEqual(errors, []);
-  console.log("Story browser checks passed: briefings, both modes, attributed manual radio, five districts, relay actions, journal, checkpoint reload, free Warden repair, festival and mobile layout.");
+  assert.equal(alignment,true,"phone itinerary location belongs below its title, not beside it");
+  await legacy.screenshot({path:join(OUT,"06-itinerary-portrait.png")});
+  await legacy.close();
+  assert.deepEqual(errors,[]);
+  console.log("Journey browser checks passed: 15 unique Blender environments, mobile UI, scanning, escort, homecoming, relay, destination endings, discovery journal and legacy-save migration.");
 } finally {
-  if (browser) await browser.close();
+  if(browser) await browser.close();
   server?.kill("SIGTERM");
 }

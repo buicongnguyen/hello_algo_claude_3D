@@ -11,7 +11,8 @@
     "test:smoke": "node tests/smoke.mjs",
     "test:story": "node tests/story-smoke.mjs",
     "test:visual": "node tests/capture.mjs",
-    "assets:blender": "node tools/blender/export.mjs"
+    "assets:blender": "node tools/blender/export.mjs && node tools/blender/export-journey.mjs",
+    "assets:journey": "node tools/blender/export-journey.mjs"
   },
   "dependencies": {
     "three": "0.186.0"

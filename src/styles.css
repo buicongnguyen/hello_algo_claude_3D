@@ -218,8 +218,9 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
   .chapter-card { padding: 20px; border-radius: 22px; }
   .chapter-number { display: none; }
   .stage-dots { grid-template-columns: 1fr; }
-  .stage-dots button { min-height: 82px; grid-template-columns: auto 1fr; align-items: center; }
-  .stage-dots button small { grid-column: 2; }
+  .stage-dots button { min-height: 82px; grid-template-columns: 30px minmax(0, 1fr); align-items: start; column-gap: 12px; }
+  .stage-dots button > span { grid-row: 1 / 5; }
+  .stage-dots button strong, .stage-dots button em, .stage-dots button small { grid-column: 2; }
   .mission-card { left: 9px; top: 9px; width: calc(100vw - 165px); padding: 10px 12px; }
   .combat-active .mission-card { width: calc(100vw - 180px); }
   .mission-card strong { font-size: 14px; }
@@ -311,7 +312,10 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
 #modalText { white-space: pre-line; }
 .celebration { position: fixed; inset: 0; z-index: 16; background: linear-gradient(0deg, rgba(2,23,39,.35), transparent 50%); }
 .departure-label { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); padding: 11px 22px; border-radius: 30px; color: var(--cyan); font-size: 12px; font-weight: 800; letter-spacing: .15em; white-space: nowrap; }
-.celebration-card { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); text-align: center; padding: 20px 26px; border-radius: 26px; }
+.celebration-card { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); max-height: calc(100dvh - 80px); overflow-y: auto; text-align: center; padding: 20px 26px; border-radius: 26px; }
+.migration-note { max-width: 420px; color: #afcdd8; font-size: 12px; line-height: 1.5; }
+.stop-location { color: var(--cyan); font-size: 11px; font-style: normal; }
+.next-destination { white-space: pre-line; color: var(--cyan); font-size: 12px; line-height: 1.6; }
 .celebration-card h2 { font-size: clamp(30px, 5vw, 48px); margin: 0 0 8px; color: var(--gold); }
 #celebrationStage { margin-bottom: 7px; font-size: 18px; font-weight: 800; }
 .departure-copy { margin-bottom: 14px; font-size: 13px; color: #c6e4ec; line-height: 1.4; }

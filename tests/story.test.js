@@ -17,7 +17,7 @@ test("every campaign stage has stakes, actionable beats, attributed dialogue and
   assert.deepEqual(journalEntries(createProgress(), ALL_STAGES), []);
   const entries = journalEntries(createProgress({ completed: ["signal:wake", "unknown:old"] }), ALL_STAGES);
   assert.equal(entries.length, 1);
-  assert.equal(entries[0].title, "Wake the Beach");
+  assert.equal(entries[0].title, "City of First Light");
   assert.equal(entries[0].text, storyFor(findStage("wake")).outcome);
 });
 
@@ -56,8 +56,8 @@ test("authored causeways and rescues fit the island and expose consistent counts
       assert.ok(Math.hypot(point.x, point.z) < 18, `${stage.id} target outside clear play space`);
     }
   }
-  assert.equal(findStage("everyone-home").stage.count, 4);
-  assert.equal(findStage("storm").stage.minShield, null);
+  assert.equal(findStage("everyone-home").stage.count, 6);
+  assert.equal(findStage("storm").stage.type, "scan");
 });
 
 test("legacy saves acquire Story mode without changing equipment, progress or unlocks", () => {

@@ -26,7 +26,7 @@ try {
   browser = await chromium.launch({ executablePath, headless: true, args: ["--use-angle=swiftshader", "--enable-webgl"] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
-  await page.waitForFunction(() => window.__ROBOT_BEACH__?.world.models.size === 25);
+  await page.waitForFunction(() => window.__ROBOT_BEACH__?.world.models.size === 42);
   await page.getByRole("heading", { name: /Signalbreak/i }).waitFor({ state: "visible", timeout: 20_000 });
   if (!process.env.ART_ONLY) {
   await page.screenshot({ path: join(OUT, "01-title.png") });
@@ -110,7 +110,7 @@ try {
     const { game, world, catalog, ui } = window.__ROBOT_BEACH__;
     game.begin(catalog[0]);
     for (const cell of game.entities.filter(e => e.kind === "cell")) game.collect(cell);
-    game.player.x = game.goal.x; game.player.z = game.goal.z; game.interact();
+    if (game.goal) { game.player.x = game.goal.x; game.player.z = game.goal.z; game.interact(); }
     ui.hideDialogue();
     world.update(1.8, null);
   };

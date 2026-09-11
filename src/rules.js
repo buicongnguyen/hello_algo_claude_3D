@@ -9,15 +9,19 @@ export function stageKey(chapterId, stageId) {
 
 export function createProgress(raw = {}) {
   if (!raw || typeof raw !== "object") raw = {};
+  const migrate = raw.version === SAVE_VERSION && raw.campaignRevision !== 2;
+  const archive = migrate ? {completed:raw.completed,results:raw.results} : raw.previousCampaign;
   return {
     version: SAVE_VERSION,
+    campaignRevision: 2,
+    previousCampaign: archive && Array.isArray(archive.completed) ? { completed:[...new Set(archive.completed.filter(value=>typeof value==="string"))], results:archive.results && typeof archive.results==="object" ? {...archive.results} : {} } : null,
     brawlBest: Number.isFinite(raw.brawlBest) ? Math.max(0, raw.brawlBest) : 0,
     equipment: normalizeEquipment(raw.equipment),
     expeditionResults: Object.fromEntries(["coral", "scrapyard", "moonpool"].filter(id => Number.isFinite(raw.expeditionResults?.[id]) && raw.expeditionResults[id] >= 0).map(id => [id, raw.expeditionResults[id]])),
-    completed: Array.isArray(raw.completed) ? [...new Set(raw.completed.filter(value => typeof value === "string"))] : [],
-    results: raw.results && typeof raw.results === "object" ? { ...raw.results } : {},
+    completed: !migrate && Array.isArray(raw.completed) ? [...new Set(raw.completed.filter(value => typeof value === "string"))] : [],
+    results: !migrate && raw.results && typeof raw.results === "object" ? { ...raw.results } : {},
     settings: { quality: "auto", reducedMotion: false, ...(raw.settings || {}), campaignMode: raw.settings?.campaignMode === "challenge" ? "challenge" : "story" },
-    checkpoint: normalizeCheckpoint(raw.checkpoint, raw.completed),
+    checkpoint: migrate ? null : normalizeCheckpoint(raw.checkpoint, raw.completed),
   };
 }
 

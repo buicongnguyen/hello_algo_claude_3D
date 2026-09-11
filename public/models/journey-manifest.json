@@ -1,0 +1,142 @@
+{
+  "generator": "Blender / build_journey.py",
+  "source": "assets/blender/discovery_environments.blend",
+  "assets": [
+    {
+      "name": "journey_city",
+      "file": "journey_city.glb",
+      "bytes": 206736,
+      "sha256": "7f842d8c022ef21a",
+      "triangles": 3512,
+      "meshes": 7
+    },
+    {
+      "name": "journey_country",
+      "file": "journey_country.glb",
+      "bytes": 189248,
+      "sha256": "75ed13f2e0fc4cc7",
+      "triangles": 3488,
+      "meshes": 7
+    },
+    {
+      "name": "journey_beach",
+      "file": "journey_beach.glb",
+      "bytes": 124568,
+      "sha256": "489af905891d4d99",
+      "triangles": 2710,
+      "meshes": 8
+    },
+    {
+      "name": "journey_reef",
+      "file": "journey_reef.glb",
+      "bytes": 579392,
+      "sha256": "5e9484614917a77a",
+      "triangles": 15972,
+      "meshes": 5
+    },
+    {
+      "name": "journey_wreck",
+      "file": "journey_wreck.glb",
+      "bytes": 262488,
+      "sha256": "613912a10fdcf68f",
+      "triangles": 5444,
+      "meshes": 4
+    },
+    {
+      "name": "journey_abyss",
+      "file": "journey_abyss.glb",
+      "bytes": 580560,
+      "sha256": "ab5c00755fcdc5e3",
+      "triangles": 11028,
+      "meshes": 5
+    },
+    {
+      "name": "journey_platform",
+      "file": "journey_platform.glb",
+      "bytes": 147536,
+      "sha256": "f2ae6d96c23c43f2",
+      "triangles": 2156,
+      "meshes": 6
+    },
+    {
+      "name": "journey_atolls",
+      "file": "journey_atolls.glb",
+      "bytes": 93908,
+      "sha256": "9edcb0b2a1223070",
+      "triangles": 2724,
+      "meshes": 6
+    },
+    {
+      "name": "journey_stormsky",
+      "file": "journey_stormsky.glb",
+      "bytes": 209744,
+      "sha256": "6a449145edf06103",
+      "triangles": 7224,
+      "meshes": 2
+    },
+    {
+      "name": "journey_highsky",
+      "file": "journey_highsky.glb",
+      "bytes": 305004,
+      "sha256": "fd96a8f701d4700d",
+      "triangles": 9768,
+      "meshes": 3
+    },
+    {
+      "name": "journey_orbit",
+      "file": "journey_orbit.glb",
+      "bytes": 112816,
+      "sha256": "fd3158dd95ac2c46",
+      "triangles": 1564,
+      "meshes": 4
+    },
+    {
+      "name": "journey_moonplain",
+      "file": "journey_moonplain.glb",
+      "bytes": 709552,
+      "sha256": "a9506c3a4bb80f3f",
+      "triangles": 11480,
+      "meshes": 6
+    },
+    {
+      "name": "journey_crater",
+      "file": "journey_crater.glb",
+      "bytes": 900340,
+      "sha256": "f6a123a58bad6e80",
+      "triangles": 14212,
+      "meshes": 5
+    },
+    {
+      "name": "journey_observatory",
+      "file": "journey_observatory.glb",
+      "bytes": 780640,
+      "sha256": "aba283cbce50e14a",
+      "triangles": 12640,
+      "meshes": 6
+    },
+    {
+      "name": "journey_home",
+      "file": "journey_home.glb",
+      "bytes": 280568,
+      "sha256": "5b7a31cac6734b0e",
+      "triangles": 5056,
+      "meshes": 10
+    },
+    {
+      "name": "journey_glass",
+      "file": "journey_glass.glb",
+      "bytes": 12572,
+      "sha256": "9622d4a07c094a3d",
+      "triangles": 150,
+      "meshes": 1
+    },
+    {
+      "name": "journey_basalt",
+      "file": "journey_basalt.glb",
+      "bytes": 7524,
+      "sha256": "c43602e06336c5ba",
+      "triangles": 60,
+      "meshes": 1
+    }
+  ]
+}

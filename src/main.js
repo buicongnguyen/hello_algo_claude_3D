@@ -31,6 +31,7 @@ let game;
 let ui;
 
 ui = new UI(progress, {
+  titleScene: () => { if (!game?.running && world.models.size) { world.clearMission(); world.setDistrict(ALL_STAGES[0]); } },
   preview: enabled => {
     if (enabled) world.showRobotPreview(progress.equipment);
     else if (world.previewActor) world.clearMission();
@@ -57,7 +58,7 @@ ui = new UI(progress, {
   pause: () => game.pause(),
   reset: () => {
     if (!confirm("Reset all Signalbreak mission progress?")) return;
-    progress = createProgress({ settings: progress.settings, equipment: progress.equipment, expeditionResults: progress.expeditionResults });
+    progress = createProgress({ settings: progress.settings, equipment: progress.equipment, expeditionResults: progress.expeditionResults, previousCampaign: progress.previousCampaign, brawlBest: progress.brawlBest });
     saveProgress(progress);
     game.progress = progress;
     ui.setProgress(progress);

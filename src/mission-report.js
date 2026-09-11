@@ -8,7 +8,7 @@ export function fieldChallenge(stage) {
   if (["combat", "brawl"].includes(stage.type)) return { id: "repair", text: "Recruit a robot teammate", goal: 1 };
   if (stage.type === "sequence") return { id: "sequence", text: "No wrong signal activations" };
   if (stage.type === "relay") return { id: "relay", text: `Connect in ${minimumRelayTurns(stage)} quarter-turns`, limit: minimumRelayTurns(stage) };
-  if (stage.id === "storm") return { id: "clean", text: "Finish the storm route without shield damage" };
+  if (stage.id === "storm" && !stage.scene) return { id: "clean", text: "Finish the storm route without shield damage" };
   if (stage.type === "finale") return { id: "core", text: "Keep all 5 core-integrity points" };
   if (["collect", "race-collect", "race"].includes(stage.type)) return { id: "speed", text: `Finish within ${Math.floor(stage.time / 2)} active seconds` };
   return { id: "clean", text: "Take no shield damage" };

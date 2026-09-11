@@ -3,6 +3,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { dressRobot } from "./equipment.js";
 import { createSurfaces, finishMaterial, coastalEnvironment, grassGeometry, groundCoverTexture } from "./surfaces.js";
 import { buildDistrict } from "./districts.js";
+import { JOURNEY_MODEL_NAMES, ENVIRONMENTS } from "./journey-data.js";
 import { actorScale, cameraZoom, CAMERA_YAW, departureHeight, limbPhase, VICTORY_DURATION } from "./presentation.js";
 
 const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm", "octopus", "starfish", "snail", "clam", "coral_cluster", "reef_arch", "salvage_tower", "moon_mushroom", "software_disc", "prism_armor", "twin_thrusters", "halo_antenna", "starship"];
@@ -24,6 +25,7 @@ export class World {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.models = new Map();
+    this.expectedModelCount = MODEL_NAMES.length + JOURNEY_MODEL_NAMES.length;
     this.assetResources = new Set();
     this.effects = [];
     this.effectPool = [];
@@ -50,13 +52,18 @@ export class World {
     const manifestAbort = new AbortController();
     const manifestTimeout = setTimeout(() => manifestAbort.abort(), 4000);
     try {
-      const response = await fetch("./models/manifest.json", { cache: "no-cache", signal: manifestAbort.signal });
-      if (response.ok) versions = Object.fromEntries((await response.json()).assets.map(asset => [asset.name, asset.sha256]));
+      const manifests = await Promise.all(["manifest.json", "journey-manifest.json"].map(async file => {
+        try {
+          const response = await fetch(`./models/${file}`, { cache: "no-cache", signal: manifestAbort.signal });
+          return response.ok ? (await response.json()).assets : [];
+        } catch { return []; }
+      }));
+      versions = Object.fromEntries(manifests.flat().map(asset => [asset.name, asset.sha256]));
     } catch { /* Unversioned fallback still works if the optional manifest is unavailable. */ }
     finally { clearTimeout(manifestTimeout); }
     this.failedModels = [];
     let loaded = 0;
-    await Promise.all(MODEL_NAMES.map(async name => {
+    await Promise.all([...MODEL_NAMES, ...JOURNEY_MODEL_NAMES].map(async name => {
       try {
         const gltf = await loader.loadAsync(`./models/${name}.glb${versions[name] ? `?v=${encodeURIComponent(versions[name])}` : ""}`);
         this.models.set(name, gltf.scene);
@@ -65,12 +72,17 @@ export class World {
         this.models.set(name, this.fallback(name));
       }
       loaded += 1;
-      onProgress(loaded / MODEL_NAMES.length, name);
+      onProgress(loaded / this.expectedModelCount, name);
     }));
     for (const model of this.models.values()) model.traverse(child => {
       if (child.geometry) this.assetResources.add(child.geometry);
       for (const material of child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : []) {
         finishMaterial(material, this.surfaces);
+        if (material.name.startsWith("Journey Water")) { material.normalMap = this.surfaces.water.normalMap; material.normalScale = new THREE.Vector2(.5,.5); }
+        if (/^Journey (.*sand|.*silt|Regolith|Abyss basalt|.*paving|Limestone|Meadow)/i.test(material.name)) {
+          material.map=this.surfaces.sand.map;material.normalMap=this.surfaces.sand.normalMap;material.normalScale.setScalar(.3);
+        }
+        if (material.name.startsWith("Journey Wood")) { material.map=this.surfaces.wood.map;material.normalMap=this.surfaces.wood.normalMap;material.normalScale.setScalar(.2); }
         this.assetResources.add(material);
         for (const value of Object.values(material)) if (value?.isTexture) this.assetResources.add(value);
       }
@@ -225,6 +237,7 @@ export class World {
   }
 
   setScenario(theme) {
+    this.scene.fog.density = .016;
     this.theme = theme;
     const palettes = {
       coral: [0x74dfdf, 0x76d8d2, 0xe9b3a8, 0xffccdf],
@@ -299,6 +312,14 @@ export class World {
 
   fallback(name) {
     const group = new THREE.Group();
+    if (name.startsWith("journey_") && ENVIRONMENTS[name.slice(8)]) {
+      const environment = ENVIRONMENTS[name.slice(8)];
+      group.name = `Journey_${environment.key}_Fallback`;
+      const floor = new THREE.Mesh(new THREE.BoxGeometry(65,.5,65), new THREE.MeshStandardMaterial({color:environment.ground}));
+      floor.position.y = ["sky","space"].includes(environment.kind) ? -6 : .15;
+      group.add(floor);
+      return group;
+    }
     const color = name.includes("rust") ? 0xc54831 : name === "energy_cell" ? 0x25dff5 : 0xe6edf0;
     const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 1.1, 5, 10), new THREE.MeshStandardMaterial({ color, roughness: 0.45 }));
     body.position.y = 1;
@@ -421,6 +442,9 @@ export class World {
 
   clearMission() {
     this.clearCelebration();
+    if (this.journeyRoot) this.release(this.journeyRoot);
+    this.journeyRoot = this.journeyCompanion = this.journeyParticles = this.journeyPlanet = this.journeyEnvironment = null;
+    this.shared.visible = true;
     this.previewActor = null;
     for (const mesh of this.effects) { mesh.removeFromParent(); this.effectPool.push(mesh); }
     this.effects.length = 0;
@@ -489,16 +513,19 @@ export class World {
         object.material.opacity = 1 - amount;
         if (amount >= 1) { object.removeFromParent(); this.effects.splice(index, 1); this.effectPool.push(object); }
     }
-    if (this.bolt && focus && this.friendAwake) {
-      const d = Math.hypot(focus.x - this.bolt.position.x, focus.z - this.bolt.position.z);
+    const bolt = this.journeyCompanion || this.bolt;
+    if (bolt && focus && this.friendAwake) {
+      const d = Math.hypot(focus.x - bolt.position.x, focus.z - bolt.position.z);
       if (d > 2.8) {
-        this.bolt.rotation.y = Math.atan2(focus.x - this.bolt.position.x, focus.z - this.bolt.position.z);
-        this.bolt.position.x += (focus.x - this.bolt.position.x) / d * Math.min(d - 2.8, dt * 4.2);
-        this.bolt.position.z += (focus.z - this.bolt.position.z) / d * Math.min(d - 2.8, dt * 4.2);
-        this.bolt.position.y = 0.55 + Math.abs(Math.sin(this.clock * 9)) * 0.06;
+        bolt.rotation.y = Math.atan2(focus.x - bolt.position.x, focus.z - bolt.position.z);
+        bolt.position.x += (focus.x - bolt.position.x) / d * Math.min(d - 2.8, dt * 4.2);
+        bolt.position.z += (focus.z - bolt.position.z) / d * Math.min(d - 2.8, dt * 4.2);
+        bolt.position.y = 0.55 + Math.abs(Math.sin(this.clock * 9)) * 0.06;
       }
-      this.animateActor(this.bolt, this.clock, d > 2.8);
-    } else if (this.bolt && !focus) this.bolt.position.lerp(new THREE.Vector3(-3, 0.55, -4), 1 - Math.exp(-dt * 2));
+      this.animateActor(bolt, this.clock, d > 2.8);
+    } else if (bolt && !focus) bolt.position.lerp(new THREE.Vector3(-3, 0.55, -4), 1 - Math.exp(-dt * 2));
+    if (this.journeyParticles && !reducedMotion) this.journeyParticles.position.y = Math.sin(this.clock*.3)*.25;
+    if (this.journeyPlanet && !reducedMotion) this.journeyPlanet.rotation.y += dt*.015;
     if (this.celebration) {
       const c = this.celebration;
       c.age = Math.min(VICTORY_DURATION, c.age + dt);
@@ -520,7 +547,8 @@ export class World {
       this.camera.lookAt(this.cameraTarget);
     } else if (focus) {
       const zoom = cameraZoom(this.camera.aspect);
-      const desired = this.desiredCamera.set(focus.x + 9.5 * zoom, 0.8 + 10 * zoom, focus.z - 1.5 + 15 * zoom);
+      const height = this.journeyEnvironment?.kind === "moon" ? 6.5 : 10;
+      const desired = this.desiredCamera.set(focus.x + 9.5 * zoom, 0.8 + height * zoom, focus.z - 1.5 + 15 * zoom);
       const target = this.desiredTarget.set(focus.x, 0.8, focus.z - 1.5);
       const damping = reducedMotion ? 1 : 1 - Math.exp(-dt * 4.5);
       this.camera.position.lerp(desired, damping);

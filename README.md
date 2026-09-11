@@ -1,22 +1,23 @@
 # Robot Beach 3D: Signalbreak
 
-A standalone Blender + Three.js successor to Robot Beach Adventures. Play KAI, a maintenance robot reconnecting five coastal districts after the Warden's obsolete storm protocol locks the community apart. Rescue friends, restore communications and repair the rule behind the blackout.
+A standalone Blender + Three.js successor to Robot Beach Adventures. KAI and BOLT find an unfinished atlas and leave Meridian City on a journey through the countryside, coast, deep ocean, open sea, sky, orbit and Moon—then return to Earth to share their discoveries.
 
-[Play Signalbreak](https://buicongnguyen.github.io/hello_algo_claude_3D/) · [Design reassessment and production roadmap](./DESIGN_REVIEW.md)
+[Play Signalbreak](https://buicongnguyen.github.io/hello_algo_claude_3D/) · [Discovery journey plan and logic review](./DISCOVERY_JOURNEY_PLAN.md) · [Long-term production roadmap](./DESIGN_REVIEW.md)
 
 This is a playable browser-game foundation, with a documented roadmap toward a much higher production standard. It is not a finished AAA-scale game.
 
 ## Features
 
-- Five authored district palettes and fifteen story missions: Breakwater Marina, Tidal Gardens, Salvage Commons, Windward Causeway and LUMA Watch.
-- Spatial relay puzzles with visible power propagation, two-shelter rescue choices and authored causeway routes.
-- Story mode removes campaign deadlines; Challenge mode keeps timed missions. Shields, core damage and boss rules matter in both modes.
-- Character-attributed radio with manual Next / Skip, actionable briefings, chapter consequences and a spoiler-safe story journal.
-- A saved Warden checkpoint preserves core integrity and damage history. The finale requires a nearby, free protocol repair before the festival launch.
+- Fifteen unique Blender environments, grouped into five chapters of three stages. Each destination has its own story, discovery and one primary activity.
+- Spatial relay puzzles, reef rescues, artifact scanning, prebuilt-turret defense, a research-buoy escort, aerial duel, flight routes and a museum homecoming.
+- Story mode removes campaign deadlines; Challenge mode keeps timed missions. Shield damage and boss rules matter in both modes.
+- Character-attributed radio with manual Next / Skip, an ordered itinerary, exact-location briefings and a spoiler-safe discovery atlas. Departures show the discovery and next destination.
+- Dive bubbles, sea-skimmers and temporary flight equipment distinguish travel without changing permanent inventory. Navigation uses a 3D scene with camera-relative planar controls, not six-axis swimming or flight simulation.
+- Previous campaign medals are archived separately on the first upgrade. Paint, equipment, expedition scores and arcade best are preserved. The obsolete Warden checkpoint is retired.
 - **Reef Expeditions:** Coral Cove Rescue, Neon Scrap Safari and Moonpool Parade—three open stages with rescue, software salvage and snail escort objectives.
 - **Robot Workshop:** six paint schemes, three software programs and three Blender-modeled attachments. Discoveries persist through retries and browser reloads.
 - Octopus ink helpers, starfish friends, NORI the escort snail and clam shield-repair stations.
-- A camera-aligned island minimap showing KAI, enemies, loot, friends, landmarks and the objective.
+- A camera-aligned survey radar showing KAI, enemies, loot, friends and the current objective.
 - **Beach Brawl:** an immediately available three-wave zombie robot beach party, independent of campaign unlocks.
 - Bubble Blaster and chaining Arc Fork pickups; tiny zombie bots, pouncing robot dogs and diving drones.
 - Freeze Pops, a summoned crab crew, and scrap-funded repairs that turn defeated robots into teammates.
@@ -46,9 +47,15 @@ This is a playable browser-game foundation, with a documented roadmap toward a m
 
 Walk over glowing items to pick them up. Touch players have a movement stick and labeled Fire, Pulse, Dash, Use, Freeze and Call buttons. Start with **Beach Brawl · Play now** for immediate fighting, or **Begin journey** for the story campaign.
 
-In relay stages, `Q` / Pulse or `E` / Use rotates the nearest relay clockwise. Follow the cyan beam to the receiver; gray outputs are unpowered. You can set downstream relays first. On rescue stages with two green shelters, either accepts a carried friend. The final Warden repair uses `E` / Use and costs **no scrap**.
+In relay stages, `Q` / Pulse or `E` / Use rotates the nearest relay clockwise. Follow the cyan beam to the receiver; gray outputs are unpowered. You can set downstream relays first. Either green refuge accepts a carried reef friend. Scan gold-marked artifacts with `E` / Use. Stay within six metres of the research buoy; it waits if you fall behind. At the final museum terminal, use `E` to share the atlas.
 
-Choose Story or Challenge in a campaign briefing. Both retain optional medals; Story's elapsed clock does not expire the mission. Arcade and expeditions keep their own limits. The Warden checkpoint appears on the title screen after the core-defense wave; it only resumes in the mode where it was saved. Retrying keeps the saved core damage and restores a full shield and Bubble Blaster. Finale victory clears that checkpoint.
+Choose Story or Challenge in a campaign briefing. Both retain optional medals; Story's elapsed clock does not expire the mission. Arcade and expeditions keep their own limits. Completing the primary activity saves the stage immediately, before the skippable AURORA departure.
+
+## Development and verification
+
+Run `npm ci`, `npm test`, `npm run build`. Browser checks require installed Edge or Chrome: `npm run test:smoke` checks gameplay, fallback loading and restart resource stability; `npm run test:story` checks all fifteen environments, mobile layouts, new activities, story UI and save migration.
+
+Set `BLENDER_BIN` to a Blender executable and run `npm run assets:journey` to regenerate the fifteen environment GLBs and two geology props. Their editable collections are in `assets/blender/discovery_environments.blend`; unhide the desired `ENV_*` collection. Static geometry is batched by material and the journey asset set is kept below 6 MB. `npm run assets:blender` rebuilds both original actors and journey assets.
 
 Choose **Reef Expeditions · New stages** to discover permanent equipment. Walk over CDs and parts to install them immediately, then use **Robot Workshop** between runs to change paint and choose your loadout. Only one software program is active at a time; physical parts occupy body, back and head slots. The clam repairs one missing shield with `E` / Use every 16 seconds. Stay within 6 m of NORI and clear robots within 3.5 m to keep the snail moving.
 

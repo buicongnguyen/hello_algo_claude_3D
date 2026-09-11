@@ -8,6 +8,9 @@ import { challengeStatus, runSummary } from "./mission-report.js";
 import { ALL_STAGES } from "./missions.js";
 import { isStoryMode, storyFor } from "./story.js";
 import { DIRECTIONS, traceRelays } from "./relay.js";
+import { DiscoveryActivity } from "./discovery.js";
+import { fitTravelRig } from "./districts.js";
+import { ENVIRONMENTS } from "./journey-data.js";
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -34,6 +37,7 @@ export class Game {
     this.world.setScenario?.(this.stage.theme || null);
     if (storyFor(item)) this.world.setDistrict?.(item);
     this.expedition = null;
+    this.discovery = null;
     this.input.clear();
     this.entities = [];
     this.time = this.stage.time;
@@ -79,6 +83,8 @@ export class Game {
     this.setupMission();
     this.combat = new Combat(this);
     this.refreshEquipment(false);
+    fitTravelRig(this.world,this.player.object,ENVIRONMENTS[this.stage.scene]?.travel);
+    if (["scan","escort","homecoming"].includes(this.stage.type)) this.discovery = new DiscoveryActivity(this);
     if (this.combat.enabled && this.progress.equipment.equipped.software === "frost") this.combat.freezeCharges = 1;
     if (this.stage.type === "expedition") this.expedition = new Expedition(this);
     if (checkpoint) this.enterWarden(checkpoint);
@@ -143,6 +149,7 @@ export class Game {
 
   setupCombat() {
     this.stage.positions.forEach((_, index) => this.spawnEnemy(false, index));
+    if (!this.stage.goal) return;
     this.goal = this.makeEntity("goal", "beacon", this.stage.goal, 0.95, { locked: true });
     this.goal.marker = this.world.createMarker(this.stage.goal, 0xffd166, 1.5);
   }
@@ -206,6 +213,7 @@ export class Game {
     this.tide.rotation.x = -Math.PI / 2;
     this.tide.position.y = 0.61;
     this.tide.scale.setScalar(1.7);
+    this.tide.visible = !this.stage.scene;
     this.world.mission.add(this.tide);
     if (this.stage.hazards) this.createHazards(3);
     if (this.stage.finalBeacon) {
@@ -222,7 +230,14 @@ export class Game {
     this.approaches.forEach(position => this.world.createRoute([position, this.relay], 0xff765f));
     this.pads = pads.slice(0, this.stage.pads).map((position, index) => ({ position, index, placed: false, marker: this.world.createMarker(position, 0xffd166, 1.55) }));
     this.phase = "prepare";
-    this.ui.message(`Place ${this.stage.pads} solar turrets`);
+    if (this.stage.prebuilt) {
+      for (const pad of this.pads) {
+        pad.placed = true; pad.marker.visible = false;
+        this.turrets.push({...pad.position, object:this.world.createActor("turret",pad.position,1),cooldown:0});
+      }
+      this.phase = "battle";
+    }
+    this.ui.message(this.stage.prebuilt ? "Turrets online · protect the receiver" : `Place ${this.stage.pads} solar turrets`);
   }
 
   setupBoss(finale) {
@@ -409,6 +424,7 @@ export class Game {
     if (this.stage.type === "race") this.updateRace();
     if (this.stage.type === "finale") this.updateFinale(dt);
     this.expedition?.update(dt);
+    this.discovery?.update(dt);
     this.entities.forEach(entity => {
       if (entity.active && ["cell", "node"].includes(entity.kind)) entity.object.rotation.y += dt * 0.8;
       if (entity.marker?.userData.ring) entity.marker.visible = entity.active && !entity.carried;
@@ -416,6 +432,7 @@ export class Game {
   }
 
   updateTide() {
+    if (this.stage.scene) return;
     const amount = clamp(this.elapsed / this.stage.time, 0, 1);
     this.tide.scale.setScalar(1.7 - amount * 0.75);
     this.tide.material.opacity = 0.22 + amount * 0.24;
@@ -660,6 +677,7 @@ export class Game {
   }
 
   interact() {
+    if (this.discovery?.interact()) return;
     if (this.stage.type === "relay") return this.turnRelay();
     if (this.stage.type === "finale" && this.phase === "repair" && distance(this.player, this.wardenRepair) < 2.5) {
       this.wardenRepair.marker.visible = false;
@@ -741,6 +759,7 @@ export class Game {
       return;
     }
     if (this.stage.type === "combat" && this.progressCount >= this.stage.count) {
+      if (!this.goal) return this.finish(true,this.stage.outcome);
       this.goal.locked = false;
       this.ui.message("Scouts restored—activate the marina beacon");
     }
@@ -758,6 +777,7 @@ export class Game {
   }
 
   updatePrompt() {
+    if (this.discovery) return this.ui.prompt(this.discovery.prompt());
     if (this.expedition) {
       this.ui.prompt(this.expedition.prompt() || (this.combat.repairTarget() ? "E · REPAIR TEAMMATE · 2 SCRAP" : ""));
       return;
@@ -778,6 +798,7 @@ export class Game {
   }
 
   progressText() {
+    if (this.discovery) return `${this.progressCount}/${this.stage.count} ${this.stage.type === "scan" ? "scans" : this.stage.type === "escort" ? "waypoints" : "atlas delivered"}`;
     if (this.expedition) return this.expedition.progressText();
     if (this.stage.type === "brawl") return `Wave ${Math.max(1, this.combat.wave)} / 3 · ${this.combat.kills} / 24`;
     if (this.stage.type === "roam") return "Island restored";
@@ -817,6 +838,7 @@ export class Game {
   }
 
   objectiveTarget() {
+    if (this.discovery) return this.discovery.objective();
     if (this.expedition) return this.expedition.objective();
     const combatTarget = this.combat.objective();
     if (combatTarget) return combatTarget;
@@ -911,7 +933,7 @@ export class Game {
         { label: "Replay", run: () => this.begin(this.item) },
       ] };
     } else {
-      this.ui.modal({ icon: "↻", eyebrow: "Mission incomplete", title: "The beach needs another try", text, stats: [[this.progressText(), "progress"], [this.shields, "shield"]], actions: [
+      this.ui.modal({ icon: "↻", eyebrow: "Mission incomplete", title: this.stage.scene ? "This discovery needs another try" : "The beach needs another try", text, stats: [[this.progressText(), "progress"], [this.shields, "shield"]], actions: [
         ...(this.stage.id === "signalbreak" && availableCheckpoint(this.progress) ? [{ label: "Retry from checkpoint", run: () => this.begin(this.item, { resumeCheckpoint: true }) }] : []),
         { label: "Try again", run: () => this.begin(this.item) },
         this.returnAction(),
@@ -926,7 +948,8 @@ export class Game {
       this.victoryElapsed = 0;
       this.world.startCelebration(this.progress.equipment);
       const pending = outcome;
-      this.ui.showCelebration(this.stage.name, () => { if (this.pendingResult === pending) this.completeVictory(); }, saved, storyFor(this.item)?.outcome);
+      const nextStage = ALL_STAGES[ALL_STAGES.findIndex(item=>item.stage.id===this.stage.id)+1];
+      this.ui.showCelebration(this.stage.name, () => { if (this.pendingResult === pending) this.completeVictory(); }, saved, storyFor(this.item)?.outcome, this.stage.discovery ? { discovery:this.stage.discovery, next:nextStage?.stage.location || "Home · atlas complete" } : null);
     } else this.ui.modal(outcome);
   }
 

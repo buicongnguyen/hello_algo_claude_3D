@@ -77,6 +77,7 @@ export class UI {
 
   showTitle() {
     this.showOnly("titleScreen");
+    this.callbacks.titleScene?.();
     this.updateCampaign();
   }
 
@@ -125,14 +126,16 @@ export class UI {
     document.querySelector("#campaignBar").style.width = `${(complete / TOTAL_STAGES) * 100}%`;
     document.querySelector("#continueButton").textContent = complete ? "Continue journey" : "Begin journey";
     document.querySelector("#roamButton").classList.toggle("hidden", !earnedUpgrades(this.progress).freeRoam);
-    document.querySelector("#resumeCheckpoint").classList.toggle("hidden", !availableCheckpoint(this.progress));
+    document.querySelector("#resumeCheckpoint").classList.toggle("hidden", ALL_STAGES.at(-1).stage.type !== "finale" || !availableCheckpoint(this.progress));
+    document.querySelector("#migrationNote").classList.toggle("hidden", !this.progress.previousCampaign?.completed.length);
   }
 
   showJournal() {
     const entries = journalEntries(this.progress, ALL_STAGES);
-    this.modal({ icon: "◈", eyebrow: "Recovered memories", title: "The island remembers", text: entries.length
-      ? entries.map(entry => `${entry.district} — ${entry.title}\n${entry.text}`).join("\n\n")
-      : "The first page is waiting. Wake BOLT at Breakwater Marina to recover the island's first memory. Only completed missions appear here; future discoveries stay secret.",
+    const archive = this.progress.previousCampaign?.completed.length;
+    this.modal({ icon: "◈", eyebrow: "Discovery atlas", title: "Every place leaves a story", text: (entries.length
+      ? entries.map(entry => `${entry.district} — ${entry.title}\n${entry.discovery}\n${entry.text}`).join("\n\n")
+      : "The first page is waiting in Meridian City. Only completed destinations appear here; future discoveries stay secret.") + (archive ? `\n\nEarlier campaign archive: ${archive} completed missions. Your previous medals are preserved in your save.` : ""),
       actions: [{ label: "Back to title", run: () => this.showTitle() }] });
   }
 
@@ -152,7 +155,8 @@ export class UI {
         const result = this.progress.results[stageKey(chapter.id, stage.id)];
         button.disabled = !unlocked;
         button.className = result ? "complete" : "";
-        button.innerHTML = `<span>${unlocked ? stageIndex + 1 : "🔒"}</span><strong>${stage.name}</strong><small>${result ? `${"◆".repeat(result.medals)}${"◇".repeat(3 - result.medals)}` : unlocked ? stage.objective : "Complete the previous mission"}</small>`;
+        button.dataset.scene = stage.scene;
+        button.innerHTML = `<span>${unlocked ? chapterIndex * 3 + stageIndex + 1 : "🔒"}</span><strong>${stage.name}</strong><em class="stop-location">${stage.location}</em><small>${stage.activity}</small><small>${result ? `${"◆".repeat(result.medals)}${"◇".repeat(3 - result.medals)}` : unlocked ? "Ready to discover" : "Complete the previous destination"}</small>`;
         button.addEventListener("click", () => this.showBriefing({ chapter, stage, chapterIndex, stageIndex }));
         dots.append(button);
       });
@@ -167,19 +171,19 @@ export class UI {
     document.querySelector("#briefChapter").textContent = item.stage.type === "expedition" ? `Expedition ${item.stageIndex + 1} · ${item.stage.difficulty}` : item.stage.type === "brawl" ? "Arcade · 3 waves · available now" : `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`;
     document.querySelector("#briefTitle").textContent = item.stage.name;
     const narrative = storyFor(item);
-    document.querySelector("#briefLocation").textContent = narrative ? DISTRICTS[item.chapter.id].name : "Beyond the story route";
+    document.querySelector("#briefLocation").textContent = narrative ? item.stage.location || DISTRICTS[item.chapter.id].name : "Beyond the story route";
     document.querySelector("#briefStakes").textContent = narrative?.stakes || "Explore, experiment, and bring your discoveries home.";
     document.querySelector("#briefBeats").replaceChildren(...(narrative?.beats || []).map(text => { const li = document.createElement("li"); li.textContent = text; return li; }));
     document.querySelector("#campaignModeControl").classList.toggle("hidden", !narrative);
     document.querySelector("#campaignModeSelect").value = this.progress.settings.campaignMode;
     document.querySelector("#briefPace").textContent = narrative ? this.progress.settings.campaignMode === "story"
-      ? `No campaign deadline. Shield and core damage still matter. Par time: ${Math.floor(item.stage.time * .75)} active seconds for the speed medal.`
-      : `Timed mission: ${item.stage.time} seconds. Defense preparation pauses the clock. Optional medals never block the next stage.`
+      ? `No campaign deadline. One activity completes this stop. Shield damage still matters. Par time: ${Math.floor(item.stage.time * .75)} active seconds for the speed medal.`
+      : `Timed mission: ${item.stage.time} seconds. Optional medals never block the next destination.`
       : `Arcade / expedition limit: ${item.stage.time} seconds. Campaign mode does not change this activity.`;
     document.querySelector("#briefStory").textContent = item.stage.story;
     document.querySelector("#briefObjective").textContent = item.stage.objective;
     document.querySelector("#briefChallenge").textContent = `Optional challenge · ${fieldChallenge(item.stage)?.text || "Explore at your own pace"}. ${["brawl", "expedition"].includes(item.stage.type) ? "+500 score on victory." : "Earn the third medal."}`;
-    document.querySelector("#briefReward").textContent = item.stage.type === "expedition" ? `Discover · ${item.stage.reward}` : item.stage.type === "brawl" ? "Weapons · Freeze Pops · Crab crew · Repaired teammates" : item.stageIndex === 2 ? `Chapter reward · ${item.chapter.reward}` : `Next · ${item.chapter.stages[item.stageIndex + 1]?.name || item.chapter.reward}`;
+    document.querySelector("#briefReward").textContent = item.stage.scene ? `Next destination · ${ALL_STAGES[item.chapterIndex * 3 + item.stageIndex + 1]?.stage.location || "Home, with a complete discovery atlas"}` : item.stage.type === "expedition" ? `Discover · ${item.stage.reward}` : "Weapons · Freeze Pops · Crab crew · Repaired teammates";
   }
 
   showGame(item) {
@@ -188,9 +192,9 @@ export class UI {
     this.screens.forEach(screen => document.querySelector(`#${screen}`).classList.add("hidden"));
     this.hud.classList.remove("hidden");
     this.touch.classList.toggle("hidden", !matchMedia("(pointer: coarse)").matches);
-    this.write("hudChapter", item.stage.type === "expedition" ? `Expedition ${item.stageIndex + 1} · ${item.stage.theme}` : item.stage.type === "brawl" ? "Beach Brawl · survive the party" : `Chapter ${item.chapter.number} · ${DISTRICTS[item.chapter.id]?.name || "Restored island"}`);
+    this.write("hudChapter", item.stage.type === "expedition" ? `Expedition ${item.stageIndex + 1} · ${item.stage.theme}` : item.stage.type === "brawl" ? "Beach Brawl · survive the party" : item.stage.location || "Restored island");
     this.write("hudTitle", item.stage.name);
-    this.write("hudObjective", item.stage.objective);
+    this.write("hudObjective", item.stage.activity || item.stage.objective);
     this.write("fieldChallenge", "");
   }
 
@@ -292,14 +296,15 @@ export class UI {
     const done = this.dialogueDone; this.dialogueDone = null; done?.();
   }
 
-  showCelebration(stageName, onSkip, saved = true, story = null) {
+  showCelebration(stageName, onSkip, saved = true, story = null, journey = null) {
     this.hideDialogue();
     clearTimeout(this.messageTimer);
     this.hud.classList.add("hidden");
     this.touch.classList.add("hidden");
     document.querySelector("#modal").classList.add("hidden");
     document.querySelector("#celebrationStage").textContent = stageName;
-    document.querySelector("#departureStory").textContent = story || "AURORA carries the repair patch to the next district. Every little friend, one bright island.";
+    document.querySelector("#departureStory").textContent = story || "AURORA carries your discoveries to the next destination.";
+    document.querySelector("#nextDestination").textContent = journey ? `Discovered: ${journey.discovery}\nNext: ${journey.next}` : "";
     document.querySelector("#celebrationSave").textContent = saved ? "Stage clear · progress saved" : "Stage clear · progress kept this session";
     const button = document.querySelector("#skipCelebration");
     button.onclick = onSkip;

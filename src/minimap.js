@@ -1,3 +1,4 @@
+import { ENVIRONMENTS } from "./journey-data.js";
 export function mapPoint(point, yaw, size = 160) {
   const scale = size / 44;
   return { x: size / 2 + (point.x * Math.cos(yaw) - point.z * Math.sin(yaw)) * scale,
@@ -10,8 +11,8 @@ export function mapMarkers(game, target) {
   for (const e of game.entities) {
     if (!e.active || e.carried) continue;
     if (["enemy", "boss"].includes(e.kind)) markers.push({ ...e, type: "enemy" });
-    else if (["ally", "creature"].includes(e.kind)) markers.push({ ...e, type: "friend" });
-    else if (["cell", "node", "relay-node"].includes(e.kind)) markers.push({ ...e, type: "loot" });
+    else if (["ally", "creature", "escort"].includes(e.kind)) markers.push({ ...e, type: "friend" });
+    else if (["cell", "node", "relay-node", "specimen"].includes(e.kind)) markers.push({ ...e, type: "loot" });
   }
   for (const p of game.combat?.pickups || []) if (p.active) markers.push({ ...p, type: "loot" });
   for (const shelter of game.shelters || []) markers.push({ ...shelter, type: "friend" });
@@ -33,6 +34,7 @@ export class Minimap {
     ctx.fillStyle = "#123f5a"; ctx.fillRect(0, 0, size, size);
     ctx.beginPath(); ctx.arc(size / 2, size / 2, size * 20 / 44, 0, Math.PI * 2);
     ctx.fillStyle = game.stage.theme === "moonpool" ? "#344a6d" : game.stage.theme === "scrapyard" ? "#535073" : "#758876";
+    if (game.stage.scene) ctx.fillStyle = `#${ENVIRONMENTS[game.stage.scene].ground.toString(16).padStart(6,"0")}`;
     ctx.fill(); ctx.strokeStyle = "#8adbd0"; ctx.lineWidth = 1.5; ctx.stroke();
     ctx.save(); ctx.clip();
     const colors = { enemy: "#ff735f", friend: "#6dffb5", loot: "#fbc563", target: "#fff1a4", landmark: "#bdcbde", player: "#ffffff" };
@@ -58,6 +60,6 @@ export class Minimap {
     ctx.restore();
     const north = mapPoint({ x: 0, z: -19 }, yaw, size);
     ctx.font = "bold 9px Segoe UI"; ctx.fillStyle = "#ddfbff"; ctx.fillText("N", north.x - 3, north.y);
-    this.canvas.setAttribute("aria-label", `Island map. KAI at ${Math.round(game.player.x)}, ${Math.round(game.player.z)}. ${target?.label || "Explore freely"}. White arrow: you; red circles: enemies; green diamonds: friends; gold diamonds: loot; star: objective.`);
+    this.canvas.setAttribute("aria-label", `Survey radar. KAI at ${Math.round(game.player.x)}, ${Math.round(game.player.z)}. ${target?.label || "Explore freely"}. White arrow: you; red circles: enemies; green diamonds: friends; gold diamonds: loot; star: objective.`);
   }
 }

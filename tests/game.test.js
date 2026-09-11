@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import * as THREE from "three";
 import { Game } from "../src/game.js";
 import { World } from "../src/world.js";
-import { ALL_STAGES, BRAWL, findStage } from "../src/missions.js";
+import { ALL_STAGES, BRAWL, findStage } from "./fixtures/legacy-campaign.js";
+import { ALL_STAGES as JOURNEY_STAGES, findStage as findJourneyStage } from "../src/missions.js";
 import { createProgress, earnedUpgrades, recordResult, availableCheckpoint } from "../src/rules.js";
 import { traceRelays } from "../src/relay.js";
 import { EXPEDITIONS } from "../src/expedition-data.js";
@@ -148,7 +149,61 @@ test("Warden checkpoint persists core damage and requires a nearby free repair b
   assert.equal(game.progress.checkpoint, null);
 });
 
-test("all fifteen mission objectives can reach completion through their actions", () => {
+test("all fifteen discovery stops finish through one activity and save exactly once", () => {
+  const {game,ui}=harness(); let saves=0;
+  game.save=()=>{saves++;return true;};
+  for (const item of JOURNEY_STAGES) {
+    game.begin(item); const before=saves, type=item.stage.type;
+    if (["collect","race-collect"].includes(type)) {
+      assert.equal(game.goal,null);
+      for(const cell of game.entities.filter(e=>e.kind==="cell")) pulseAt(game,cell);
+    } else if(type==="relay") solveRelay(game);
+    else if(type==="combat") { assert.equal(game.goal,null); for(const enemy of game.entities.filter(e=>e.kind==="enemy")) defeat(game,enemy); }
+    else if(type==="rescue") {
+      for(const [i,friend] of game.entities.filter(e=>e.kind==="creature").entries()) {
+        move(game,friend);game.interact();move(game,game.shelters[i%2]);game.interact();
+      }
+    } else if(type==="scan") for(const target of game.discovery.targets) { move(game,target);game.interact(); }
+    else if(type==="escort") for(let tick=0;tick<600 && game.running;tick++) { move(game,game.discovery.buoy);game.discovery.update(.1); }
+    else if(type==="defense") {
+      assert.equal(game.phase,"battle");assert.equal(game.turrets.length,2);
+      for(let tick=0;tick<1800 && game.running;tick++) {
+        game.update(.05); for(const enemy of game.entities.filter(e=>e.active && e.kind==="enemy")) defeat(game,enemy);
+        move(game,{x:18,z:0});
+      }
+    } else if(type==="boss") defeat(game,game.boss);
+    else if(type==="race") for(const gate of game.gates) {move(game,gate.position);game.updateRace();}
+    else if(type==="homecoming") {move(game,game.discovery.terminal);game.interact();}
+    else assert.fail(`Unhandled activity ${type}`);
+    assert.equal(game.running,false,item.stage.id);
+    assert.equal(ui.outcome?.eyebrow,"Mission complete",`${item.stage.id}: ${ui.outcome?.text}`);
+    assert.equal(saves,before+1,item.stage.id);
+    game.interact();assert.equal(saves,before+1,"repeated input cannot duplicate a result");
+  }
+  assert.equal(game.progress.completed.length,15);
+});
+
+test("scans require proximity, cannot repeat, and do not consume equipment", () => {
+  const {game}=harness(); game.begin(findJourneyStage("split-current"));
+  const equipment=JSON.stringify(game.progress.equipment);
+  game.interact();assert.equal(game.progressCount,0);
+  move(game,game.discovery.targets[0]);game.interact();game.interact();
+  assert.equal(game.progressCount,1);assert.equal(game.discovery.targets[0].marker.visible,false);
+  assert.equal(JSON.stringify(game.progress.equipment),equipment);
+  game.stop();game.discovery.interact();assert.equal(game.progressCount,1);
+});
+
+test("escort waits for a distant player and cannot finish after failure", () => {
+  const {game}=harness();game.begin(findJourneyStage("approaches"));
+  const buoy=game.discovery.buoy, start={x:buoy.x,z:buoy.z};
+  move(game,{x:15,z:-10});game.discovery.update(1);
+  assert.deepEqual({x:buoy.x,z:buoy.z},start);assert.equal(game.discovery.waiting,true);
+  move(game,buoy);game.discovery.update(.1);assert.notEqual(buoy.x,start.x);
+  game.finish(false,"test failure");const count=game.progressCount;
+  game.discovery.update(100);game.interact();assert.equal(game.progressCount,count);
+});
+
+test("legacy compound activities retain their original completion rules", () => {
   const { game, ui, world } = harness();
   for (const item of ALL_STAGES) {
     game.begin(item);

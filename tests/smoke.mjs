@@ -58,14 +58,14 @@ try {
   const cooldown = await page.evaluate(() => window.__ROBOT_BEACH__.game.pulseCooldown);
   if (cooldown <= 0) throw new Error("Pulse action did not trigger");
   await page.keyboard.press("Escape");
-  await page.getByRole("heading", { name: "Wake the Beach" }).waitFor({ state: "visible" });
+  await page.getByRole("heading", { name: "City of First Light" }).waitFor({ state: "visible" });
   await page.getByRole("button", { name: "Resume" }).click();
 
   const assets = await page.evaluate(() => {
     const api = window.__ROBOT_BEACH__;
     return { loaded: api.world.models.size, failed: api.world.failedModels, actualBlender: Boolean(api.world.models.get("kai").getObjectByName("KAI_Robot")), limbs: api.game.player.object.userData.limbs.length };
   });
-  if (assets.loaded !== 25 || assets.failed.length || !assets.actualBlender || assets.limbs !== 4) throw new Error(`Blender asset/pivot regression: ${JSON.stringify(assets)}`);
+  if (assets.loaded !== 42 || assets.failed.length || !assets.actualBlender || assets.limbs !== 4) throw new Error(`Blender asset/pivot regression: ${JSON.stringify(assets)}`);
   const art = await page.evaluate(() => {
     const { world } = window.__ROBOT_BEACH__;
     return { environment: Boolean(world.scene.environment), normal: Boolean(world.models.get("kai").getObjectByName("Torso").material.normalMap),
@@ -73,7 +73,7 @@ try {
   });
   if (!art.environment || !art.normal || art.calls > 450 || art.triangles > 400_000) throw new Error(`Art rendering budget or surfaces failed: ${JSON.stringify(art)}`);
   console.log(`Mission art check: ${JSON.stringify(art)}`);
-  if (modelRequests.length !== 25 || modelRequests.some(url => !/\.glb\?v=[a-f0-9]{16}$/.test(url))) throw new Error("Models are not using content-versioned URLs");
+  if (modelRequests.length !== 42 || modelRequests.some(url => !/\.glb\?v=[a-f0-9]{16}$/.test(url))) throw new Error("Models are not using content-versioned URLs");
   const modelScale = await page.evaluate(() => window.__ROBOT_BEACH__.game.player.object.scale.y);
   if (Math.abs(modelScale - 0.94 * 0.82) > 0.001) throw new Error(`Gameplay KAI is not using compact proportions: ${modelScale}`);
 
@@ -266,7 +266,7 @@ try {
     const { game, catalog } = window.__ROBOT_BEACH__;
     game.begin(catalog[0]);
     for (const cell of game.entities.filter(e => e.kind === "cell")) game.collect(cell);
-    game.player.x = game.goal.x; game.player.z = game.goal.z; game.interact();
+    if (game.goal) { game.player.x = game.goal.x; game.player.z = game.goal.z; game.interact(); }
   });
   await page.getByRole("heading", { name: "Congratulations!", exact: true }).waitFor();
   const departure = await page.evaluate(() => {
@@ -278,10 +278,10 @@ try {
   });
   if (!departure.real || !departure.stopped || !departure.saved || departure.end <= departure.start) throw new Error(`Departure failed: ${JSON.stringify(departure)}`);
   await page.getByRole("button", { name: "View results · Skip launch", exact: true }).click();
-  await page.getByRole("heading", { name: "Wake the Beach", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "City of First Light", exact: true }).waitFor();
   if (!await page.locator("#modalText").textContent().then(text => text.includes("Optional challenge"))) throw new Error("Results omit the field challenge");
   await page.getByRole("button", { name: "Next mission", exact: true }).click();
-  await page.getByRole("heading", { name: "Follow the Light", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "The Windmill Message", exact: true }).waitFor();
   if (!await page.locator("#briefChallenge").isVisible()) throw new Error("Briefing does not explain the optional medal");
   const victoryResources = await page.evaluate(() => {
     const { world, game, catalog, brawl, expeditions, ui } = window.__ROBOT_BEACH__;
@@ -322,18 +322,18 @@ try {
   await fallbackPage.goto(URL, { waitUntil: "networkidle" });
   // The loading screen also says Signalbreak; wait for initialized game state.
   try {
-    await fallbackPage.waitForFunction(() => window.__ROBOT_BEACH__?.world.models.size === 25, null, { timeout: 20_000 });
+    await fallbackPage.waitForFunction(() => window.__ROBOT_BEACH__?.world.models.size === 42, null, { timeout: 20_000 });
   } catch (error) {
     console.error("Fallback initialization:", await fallbackPage.evaluate(() => ({ status: document.querySelector("#loadStatus")?.textContent, models: window.__ROBOT_BEACH__?.world.models.size })), errors);
     throw error;
   }
   await fallbackPage.locator("#gameTitle").waitFor({ state: "visible", timeout: 20_000 });
   const fallbackAssets = await fallbackPage.evaluate(() => ({ count: window.__ROBOT_BEACH__.world.models.size, failed: window.__ROBOT_BEACH__.world.failedModels.length }));
-  if (fallbackAssets.count !== 25 || fallbackAssets.failed) throw new Error("Optional manifest failure prevented real model loading");
+  if (fallbackAssets.count !== 42 || fallbackAssets.failed) throw new Error("Optional manifest failure prevented real model loading");
   await fallbackPage.close();
 
   if (errors.length) throw new Error(`Browser errors:\n${errors.join("\n")}`);
-  console.log(process.env.FALLBACK_ONLY ? "Fallback-only check passed: all 25 real Blender models loaded without the optional manifest." : "Smoke test passed: 25 Blender models, versioned assets, campaign, Brawl, expeditions, Workshop, minimap, input, saved/skippable starship victories, next-stage flow and resource stability.");
+  console.log(process.env.FALLBACK_ONLY ? "Fallback-only check passed: all 42 real Blender models loaded without the optional manifest." : "Smoke test passed: 42 Blender models, versioned assets, campaign, Brawl, expeditions, Workshop, minimap, input, saved/skippable starship victories, next-stage flow and resource stability.");
 } finally {
   if (browser) await browser.close();
   server?.kill("SIGTERM");
