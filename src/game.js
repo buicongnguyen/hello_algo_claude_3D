@@ -1,9 +1,11 @@
 import * as THREE from "three";
-import { applyHit, earnedUpgrades, recordResult, sequenceStep } from "./rules.js";
+import { applyHit, earnedUpgrades, medalFor, recordResult, sequenceStep } from "./rules.js";
 import { Combat } from "./combat.js";
 import { Expedition } from "./expeditions.js";
 import { dressRobot, equipmentStats } from "./equipment.js";
-import { actorHeight } from "./presentation.js";
+import { actorHeight, VICTORY_DURATION } from "./presentation.js";
+import { challengeStatus, runSummary } from "./mission-report.js";
+import { ALL_STAGES } from "./missions.js";
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -22,6 +24,7 @@ export class Game {
   }
 
   begin(item) {
+    this.cancelVictory();
     this.item = item;
     this.stage = item.stage;
     this.world.clearMission();
@@ -53,11 +56,11 @@ export class Game {
     this.pads = [];
     this.gates = [];
     this.wrongActions = 0;
+    this.metrics = { damageTaken: 0, recruited: 0, calls: 0, frozenEnemies: 0 };
     this.phase = "active";
     this.spawned = 0;
     this.escaped = 0;
     this.spawnTimer = 1;
-    this.celebrationTime = 0;
     this.hudElapsed = 0.1;
     this.world.setCampaign?.(this.progress);
     this.player = { x: 0, z: 13, speed: 6.3, radius: 0.9, object: this.world.createActor("kai", { x: 0, z: 13 }, 0.94) };
@@ -219,7 +222,7 @@ export class Game {
     this.cloneMaterials(enemy.object);
     enemy.healthBar = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xff745c, depthTest: false }));
     enemy.healthBar.scale.set(1.5, 0.13, 1);
-    enemy.healthBar.position.y = variant === "drone" ? 1.35 : variant === "dog" ? 1.8 : 3.2;
+    enemy.healthBar.position.y = variant === "drone" ? 1.35 : variant === "dog" ? 2.35 : 3.2;
     enemy.object.add(enemy.healthBar);
     this.entities.push(enemy);
     return enemy;
@@ -256,13 +259,13 @@ export class Game {
   }
 
   update(dt) {
-    if (!this.running || this.paused) return;
-    if (this.input.consume("pause")) return this.pause();
-    if (this.phase === "celebrate") {
-      this.celebrationTime += dt;
-      if (this.celebrationTime >= 5) this.finish(true, "The Warden's broken storm protocol is repaired. BOLT calls every friend to the beach as the Aurora light guides the festival rocket home. A safe island is yours to explore.");
+    if (this.pendingResult) {
+      this.victoryElapsed += dt;
+      if (this.victoryElapsed >= VICTORY_DURATION) this.completeVictory();
       return;
     }
+    if (!this.running || this.paused) return;
+    if (this.input.consume("pause")) return this.pause();
     if (this.stage.type === "roam") {
       this.elapsed += dt;
       this.pulseCooldown = Math.max(0, this.pulseCooldown - dt);
@@ -432,11 +435,13 @@ export class Game {
       if (boss.warningLine) { this.world.release?.(boss.warningLine); boss.warningLine = null; }
     } else if (boss.state === "charge") {
       const d = Math.hypot(boss.chargeX - boss.x, boss.chargeZ - boss.z) || 1;
-      boss.x += ((boss.chargeX - boss.x) / d) * 11 * dt;
-      boss.z += ((boss.chargeZ - boss.z) / d) * 11 * dt;
+      const step = Math.min(d, 11 * dt);
+      boss.object.rotation.y = Math.atan2(boss.chargeX - boss.x, boss.chargeZ - boss.z);
+      boss.x += ((boss.chargeX - boss.x) / d) * step;
+      boss.z += ((boss.chargeZ - boss.z) / d) * step;
       boss.object.position.set(boss.x, 0.55, boss.z);
       if (distance(boss, this.player) < 1.8) this.damagePlayer();
-      if (boss.stateTime <= 0 || d < 0.5) {
+      if (boss.stateTime <= 0 || d - step < 0.5) {
         boss.state = "exposed";
         boss.stateTime = 2.8;
         this.tint(boss.object, 0x65e5ff, 1.2);
@@ -518,6 +523,7 @@ export class Game {
     this.world.pulse(this.player, radius, 0x65e5ff);
     let hits = 0;
     for (const entity of this.entities.filter(entity => entity.active && distance(entity, this.player) <= radius)) {
+      if (!this.running) break;
       if (entity.kind === "cell") {
         this.collect(entity);
         hits += 1;
@@ -590,14 +596,7 @@ export class Game {
       return this.finish(true, this.stage.id === "wake" ? "BOLT is online. The restored dock points toward the first fragment." : "The beacon is restored and the next part of the island network is open.");
     }
     if (this.stage.type === "finale" && this.phase === "launch" && distance(this.player, this.rocketGoal) < 3) {
-      this.phase = "celebrate";
-      this.input.clear();
-      this.input.enabled = false;
-      this.ui.hideDialogue?.();
-      this.ui.prompt("");
-      this.ui.message("Aurora restored. Three, two, one… lift off!");
-      this.world.launchRocket?.();
-      return;
+      return this.finish(true, "The Warden is repaired and the Aurora signal is restored. AURORA carries the good news to every island. The whole beach is ready for the festival!");
     }
     if (this.combat.repair()) return;
     this.ui.message("Move closer to the highlighted target", true);
@@ -664,6 +663,7 @@ export class Game {
     this.shields = result.shields;
     this.invulnerable = result.invulnerable;
     if (result.damaged) {
+      this.metrics.damageTaken += 1;
       this.ui.message(message, true);
       if (!this.progress.settings.reducedMotion) this.player.object.rotation.z = 0.12;
     }
@@ -716,6 +716,7 @@ export class Game {
       pulseReady: 1 - clamp(this.pulseCooldown / 1.1, 0, 1),
       dashReady: 1 - clamp(this.dashCooldown / this.upgrades.dashRecharge, 0, 1),
       combat: this.combat,
+      challenge: challengeStatus(this),
     });
     const target = this.objectiveTarget();
     this.ui.navigation?.(target, this.player, this.world.cameraYaw || 0);
@@ -753,64 +754,104 @@ export class Game {
     this.paused = true;
     this.input.clear();
     this.input.enabled = false;
-    this.ui.modal({ icon: "Ⅱ", eyebrow: "Mission paused", title: this.stage.name, text: this.stage.objective, actions: [
+    this.ui.modal({ icon: "Ⅱ", eyebrow: "Mission paused", title: this.stage.name, text: `${this.stage.objective}${challengeStatus(this) ? ` Optional: ${challengeStatus(this).text}.` : ""}`, actions: [
       { label: "Resume", run: () => { this.input.clear(); this.input.enabled = true; this.paused = false; } },
       { label: "Restart", run: () => this.begin(this.item) },
-      { label: this.expedition ? "Expeditions" : "Mission map", run: () => { this.stop(); this.expedition ? this.ui.showExpeditions() : this.ui.showMap(); } },
+      this.returnAction(),
     ] });
   }
 
   finish(won, text) {
     if (!this.running) return;
+    if (won && (this.time <= 0 || this.shields <= 0)) {
+      won = false;
+      text = this.time <= 0 ? "The mission clock expired before the objective was complete." : "KAI's shield is empty. Try the route again.";
+    }
     this.running = false;
+    this.phase = won ? "complete" : "failed";
     this.paused = false;
     this.input.enabled = false;
     this.input.clear();
     this.ui.hideDialogue?.();
     this.ui.prompt("");
+    const bonus = challengeStatus(this);
+    const report = `${text}\n${runSummary(this)}.\nOptional challenge: ${bonus?.text || "Explore"} — ${won && bonus?.done ? "completed!" : "not earned this run."}`;
+    let outcome;
+    let saved = true;
     if (won && this.expedition) {
-      const score = this.combat.kills * 100 + this.shields * 100 + Math.max(0, Math.floor(this.time)) * 5;
+      const score = this.combat.kills * 100 + this.shields * 100 + Math.max(0, Math.floor(this.time)) * 5 + (bonus.done ? 500 : 0);
       this.progress.expeditionResults[this.stage.id] = Math.max(this.progress.expeditionResults[this.stage.id] || 0, score);
-      this.save(this.progress);
+      saved = this.save(this.progress) !== false;
       this.ui.setProgress(this.progress);
-      this.ui.modal({ icon: this.stage.icon, eyebrow: "Expedition complete", title: this.stage.name, text,
-        stats: [[score, "score"], [this.progress.equipment.owned.length, "discoveries owned"], [this.progress.expeditionResults[this.stage.id], "best"]], actions: [
+      outcome = { icon: this.stage.icon, eyebrow: "Expedition complete", title: this.stage.name, text: report,
+        stats: [[score, "this run"], [this.progress.equipment.owned.length, "discoveries owned"], [this.progress.expeditionResults[this.stage.id], "best"], [bonus.done ? "+500" : "—", "challenge bonus"]], actions: [
           { label: "More expeditions", run: () => { this.stop(); this.ui.showExpeditions(); } },
           { label: "Workshop", run: () => { this.stop(); this.ui.showWorkshop(); } },
           { label: "Replay", run: () => this.begin(this.item) },
-        ] });
-      return;
-    }
-    if (won && this.stage.type === "brawl") {
+        ] };
+    } else if (won && this.stage.type === "brawl") {
       const allies = this.entities.filter(e => e.kind === "ally").length;
-      const score = this.combat.kills * 100 + allies * 200 + this.shields * 50 + Math.max(0, Math.floor(this.time)) * 10;
+      const score = this.combat.kills * 100 + allies * 200 + this.shields * 50 + Math.max(0, Math.floor(this.time)) * 10 + (bonus.done ? 500 : 0);
       this.progress.brawlBest = Math.max(this.progress.brawlBest || 0, score);
-      this.save(this.progress);
-      this.ui.modal({ icon: "✦", eyebrow: "Brawl won", title: "Tiny heroes. Big beach party.", text, stats: [[score, "score"], [allies, "robot pals"], [this.progress.brawlBest, "best"]], actions: [
+      saved = this.save(this.progress) !== false;
+      outcome = { icon: "✦", eyebrow: "Brawl won", title: "Tiny heroes. Big beach party.", text: report, stats: [[score, "this run"], [allies, "robot pals"], [this.progress.brawlBest, "best"], [bonus.done ? "+500" : "—", "challenge bonus"]], actions: [
         { label: "Play again", run: () => this.begin(this.item) },
         { label: "Back to title", run: () => { this.stop(); this.ui.showTitle(); } },
-      ] });
-      return;
-    }
-    if (won) {
-      const challenge = this.shields >= 2 && this.wrongActions === 0;
-      this.progress = recordResult(this.progress, this.item.chapter, this.stage, Math.max(0, this.time), challenge);
-      this.save(this.progress);
+      ] };
+    } else if (won) {
+      const medals = medalFor(this.time, this.stage.time, bonus.done);
+      this.progress = recordResult(this.progress, this.item.chapter, this.stage, Math.max(0, this.time), bonus.done);
+      saved = this.save(this.progress) !== false;
       this.ui.setProgress(this.progress);
       const result = this.progress.results[`${this.item.chapter.id}:${this.stage.id}`];
-      this.ui.modal({ icon: "✦", eyebrow: "Mission complete", title: this.stage.name, text, stats: [["◆".repeat(result.medals), "medals"], [Math.ceil(this.time), "seconds left"], [this.shields, "shield"]], actions: [
-        { label: "Continue", run: () => { this.stop(); this.ui.showMap(); } },
+      const next = ALL_STAGES[ALL_STAGES.findIndex(item => item.stage.id === this.stage.id) + 1];
+      outcome = { icon: "✦", eyebrow: "Mission complete", title: this.stage.name, text: report, stats: [["◆".repeat(medals), "this run"], ["◆".repeat(result.medals), "best medals"], [Math.ceil(this.time), "seconds left"], [this.shields, "shield"]], actions: [
+        ...(next ? [{ label: "Next mission", run: () => { this.stop(); this.ui.showBriefing(next); } }] : []),
+        { label: "Mission map", run: () => { this.stop(); this.ui.showMap(); } },
         { label: "Replay", run: () => this.begin(this.item) },
-      ] });
+      ] };
     } else {
       this.ui.modal({ icon: "↻", eyebrow: "Mission incomplete", title: "The beach needs another try", text, stats: [[this.progressText(), "progress"], [this.shields, "shield"]], actions: [
         { label: "Try again", run: () => this.begin(this.item) },
-        { label: this.expedition ? "Expeditions" : "Mission map", run: () => { this.stop(); this.expedition ? this.ui.showExpeditions() : this.ui.showMap(); } },
+        this.returnAction(),
       ] });
+      return;
     }
+    if (!saved) outcome.text += "\nSaving is unavailable: progress is kept for this session only.";
+    this.ui.callbacks?.sound?.("victory");
+    // Save is complete. Animation and skipping cannot modify the recorded outcome.
+    if (this.world.startCelebration && this.ui.showCelebration) {
+      this.pendingResult = outcome;
+      this.victoryElapsed = 0;
+      this.world.startCelebration(this.progress.equipment);
+      const pending = outcome;
+      this.ui.showCelebration(this.stage.name, () => { if (this.pendingResult === pending) this.completeVictory(); }, saved);
+    } else this.ui.modal(outcome);
+  }
+
+  returnAction() {
+    return { label: this.expedition ? "Expeditions" : this.stage.type === "brawl" ? "Back to title" : "Mission map", run: () => {
+      const destination = this.expedition ? "showExpeditions" : this.stage.type === "brawl" ? "showTitle" : "showMap";
+      this.stop(); this.ui[destination]();
+    } };
+  }
+
+  completeVictory() {
+    if (!this.pendingResult) return;
+    const outcome = this.pendingResult;
+    this.pendingResult = null;
+    this.ui.hideCelebration?.();
+    this.ui.modal(outcome);
+  }
+
+  cancelVictory() {
+    this.pendingResult = null;
+    this.victoryElapsed = 0;
+    this.ui.hideCelebration?.();
   }
 
   stop() {
+    this.cancelVictory();
     this.running = false;
     this.paused = false;
     this.world.clearMission();

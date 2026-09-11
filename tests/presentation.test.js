@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import * as THREE from "three";
-import { actorScale, actorHeight, cameraZoom, CAMERA_YAW, MODEL_SCALE } from "../src/presentation.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { actorScale, actorHeight, cameraZoom, CAMERA_YAW, MODEL_SCALE, departureHeight, limbPhase } from "../src/presentation.js";
 import { World } from "../src/world.js";
 import { dressRobot, normalizeEquipment } from "../src/equipment.js";
 
@@ -51,5 +53,29 @@ test("detailed Blender exports stay within a browser asset budget", () => {
     const bytes = readFileSync(new URL(`../public/models/${asset.file}`, import.meta.url));
     assert.equal(bytes.length, asset.bytes);
     assert.equal(bytes.toString("utf8", 0, 4), "glTF");
+    assert.equal(asset.sha256, createHash("sha256").update(bytes).digest("hex").slice(0, 16));
+  }
+});
+
+test("quadrupeds trot diagonally and departure motion is bounded", () => {
+  assert.equal(limbPhase("Hip_L_F", true), limbPhase("Hip_R_B", true));
+  assert.equal(limbPhase("Hip_R_F", true), limbPhase("Hip_L_B", true));
+  assert.notEqual(limbPhase("Hip_R_F", true), limbPhase("Hip_L_F", true));
+  assert.equal(departureHeight(0), 0.65);
+  assert.ok(departureHeight(3) > departureHeight(2));
+  assert.equal(departureHeight(100), departureHeight(4.4));
+  assert.ok(departureHeight(4.4, true) < 3.2);
+});
+
+test("real Blender dogs have taller canine proportions and named joints", async () => {
+  for (const name of ["bolt", "zombie_dog"]) {
+    const bytes = readFileSync(new URL(`../public/models/${name}.glb`, import.meta.url));
+    const { scene } = await new GLTFLoader().parseAsync(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), "");
+    const size = new THREE.Box3().setFromObject(scene).getSize(new THREE.Vector3());
+    assert.ok(size.y > 1.8 && size.z > size.x * 2, `${name}: ${size.toArray()}`);
+    const joints = []; scene.traverse(child => { if (child.name.startsWith("Hip_")) joints.push(child); });
+    assert.equal(joints.length, 4);
+    assert.ok(joints.some(joint => joint.name.includes("_L_B")));
+    assert.ok(scene.getObjectByName("TailPivot") || scene.getObjectByName("TailPivot001"));
   }
 });

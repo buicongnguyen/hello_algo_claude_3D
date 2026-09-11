@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { dressRobot } from "./equipment.js";
-import { actorScale, cameraZoom, CAMERA_YAW } from "./presentation.js";
+import { actorScale, cameraZoom, CAMERA_YAW, departureHeight, limbPhase, VICTORY_DURATION } from "./presentation.js";
 
-const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm", "octopus", "starfish", "snail", "clam", "coral_cluster", "reef_arch", "salvage_tower", "moon_mushroom", "software_disc", "prism_armor", "twin_thrusters", "halo_antenna"];
+const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm", "octopus", "starfish", "snail", "clam", "coral_cluster", "reef_arch", "salvage_tower", "moon_mushroom", "software_disc", "prism_armor", "twin_thrusters", "halo_antenna", "starship"];
 
 export class World {
   constructor(canvas, settings) {
@@ -31,7 +31,8 @@ export class World {
     this.desiredTarget = new THREE.Vector3();
     this.shared = new THREE.Group();
     this.mission = new THREE.Group();
-    this.scene.add(this.shared, this.mission);
+    this.celebrationRoot = new THREE.Group();
+    this.scene.add(this.shared, this.mission, this.celebrationRoot);
     this.cameraTarget = new THREE.Vector3();
     this.clock = 0;
     this.resize = this.resize.bind(this);
@@ -43,12 +44,22 @@ export class World {
     this.buildEnvironment();
     this.setQuality(this.settings.quality || "auto");
     const loader = new GLTFLoader();
+    let versions = {};
+    const manifestAbort = new AbortController();
+    const manifestTimeout = setTimeout(() => manifestAbort.abort(), 4000);
+    try {
+      const response = await fetch("./models/manifest.json", { cache: "no-cache", signal: manifestAbort.signal });
+      if (response.ok) versions = Object.fromEntries((await response.json()).assets.map(asset => [asset.name, asset.sha256]));
+    } catch { /* Unversioned fallback still works if the optional manifest is unavailable. */ }
+    finally { clearTimeout(manifestTimeout); }
+    this.failedModels = [];
     let loaded = 0;
     await Promise.all(MODEL_NAMES.map(async name => {
       try {
-        const gltf = await loader.loadAsync(`./models/${name}.glb`);
+        const gltf = await loader.loadAsync(`./models/${name}.glb${versions[name] ? `?v=${encodeURIComponent(versions[name])}` : ""}`);
         this.models.set(name, gltf.scene);
       } catch {
+        this.failedModels.push(name);
         this.models.set(name, this.fallback(name));
       }
       loaded += 1;
@@ -230,6 +241,26 @@ export class World {
     this.previewActor.rotation.y = this.previewAngle ?? 0.4;
   }
 
+  startCelebration(equipment) {
+    this.clearCelebration();
+    this.mission.visible = false;
+    this.landmarks.visible = this.boardwalk.visible = this.planks.visible = false;
+    const ship = this.createActor("starship", { x: 0, y: 0.65, z: -1.5 }, 1, this.celebrationRoot);
+    const hero = this.createActor("kai", { x: -2.1, z: 1.5 }, 0.94, this.celebrationRoot);
+    dressRobot(this, hero, equipment);
+    const dog = this.createActor("bolt", { x: 1.7, z: 0.4 }, 0.95, this.celebrationRoot);
+    hero.rotation.y = -0.25; dog.rotation.y = 0.3;
+    const exhaust = [];
+    ship.traverse(child => { if (child.name.startsWith("Exhaust_")) exhaust.push(child); });
+    this.celebration = { ship, hero, dog, exhaust, age: 0 };
+  }
+
+  clearCelebration() {
+    this.celebration = null;
+    for (const child of [...this.celebrationRoot.children]) this.release(child);
+    this.mission.visible = true;
+  }
+
   animateSeaLife(object, time, open = true) {
     if (!object.userData.seaJoints) {
       object.userData.seaJoints = [];
@@ -263,16 +294,21 @@ export class World {
     });
     parent.add(object);
     object.userData.limbs = [];
-    object.traverse(child => { if (/^(Hip|ShoulderPivot)_/.test(child.name)) object.userData.limbs.push(child); });
+    object.userData.quadruped = ["bolt", "zombie_dog"].includes(name);
+    object.userData.tails = [];
+    object.traverse(child => {
+      if (/^(Hip|ShoulderPivot)_/.test(child.name)) object.userData.limbs.push(child);
+      if (child.name.startsWith("TailPivot")) object.userData.tails.push(child);
+    });
     return object;
   }
 
   animateActor(object, time, moving) {
     for (const limb of object.userData.limbs || []) {
-      const side = limb.name.includes("_L") ? 1 : -1;
-      const arm = limb.name.startsWith("Shoulder");
-      limb.rotation.x = moving ? Math.sin(time * 11) * 0.42 * side * (arm ? -1 : 1) : 0;
+      const dog = object.userData.quadruped;
+      limb.rotation.x = moving ? Math.sin(time * (dog ? 9 : 11)) * (dog ? 0.35 : 0.42) * limbPhase(limb.name, dog) : 0;
     }
+    for (const tail of object.userData.tails || []) tail.rotation.z = Math.sin(time * (moving ? 7 : 3)) * 0.3;
   }
 
   constrainPlayer(player) {
@@ -349,12 +385,12 @@ export class World {
   }
 
   clearMission() {
+    this.clearCelebration();
     this.previewActor = null;
     for (const mesh of this.effects) { mesh.removeFromParent(); this.effectPool.push(mesh); }
     this.effects.length = 0;
     for (const child of [...this.mission.children]) this.release(child);
     this.markers.length = 0;
-    this.launchTime = null;
     if (this.rocket) this.rocket.position.y = 0.55;
     if (this.ground) this.setScenario(null);
   }
@@ -371,10 +407,6 @@ export class World {
       }
     });
     for (const resource of disposable) resource.dispose();
-  }
-
-  launchRocket() {
-    this.launchTime = 0;
   }
 
   setCampaign(progress) {
@@ -419,10 +451,6 @@ export class World {
         object.material.opacity = 1 - amount;
         if (amount >= 1) { object.removeFromParent(); this.effects.splice(index, 1); this.effectPool.push(object); }
     }
-    if (this.launchTime != null) {
-      this.launchTime += dt;
-      this.rocket.position.y = 0.55 + Math.min(65, this.launchTime * this.launchTime * 1.8);
-    }
     if (this.bolt && focus && this.friendAwake) {
       const d = Math.hypot(focus.x - this.bolt.position.x, focus.z - this.bolt.position.z);
       if (d > 2.8) {
@@ -431,8 +459,23 @@ export class World {
         this.bolt.position.z += (focus.z - this.bolt.position.z) / d * Math.min(d - 2.8, dt * 4.2);
         this.bolt.position.y = 0.55 + Math.abs(Math.sin(this.clock * 9)) * 0.06;
       }
+      this.animateActor(this.bolt, this.clock, d > 2.8);
     } else if (this.bolt && !focus) this.bolt.position.lerp(new THREE.Vector3(-3, 0.55, -4), 1 - Math.exp(-dt * 2));
-    if (this.previewActor) {
+    if (this.celebration) {
+      const c = this.celebration;
+      c.age = Math.min(VICTORY_DURATION, c.age + dt);
+      c.ship.position.y = departureHeight(c.age, reducedMotion);
+      for (const flame of c.exhaust) {
+        flame.visible = c.age > 0.65;
+        flame.scale.z = reducedMotion ? 0.5 : 0.65 + Math.min(1, c.age / 2);
+      }
+      this.animateActor(c.dog, reducedMotion ? 0 : this.clock, false);
+      const zoom = this.camera.aspect < 1 ? 1.55 : 1;
+      const rise = reducedMotion ? 0 : Math.min(8, c.ship.position.y) * 0.28;
+      this.camera.position.lerp(this.desiredCamera.set(7 * zoom, 6.5 * zoom + rise, 11 * zoom), reducedMotion ? 1 : 1 - Math.exp(-dt * 5));
+      this.cameraTarget.lerp(this.desiredTarget.set(0, 1.6 + rise, 0), reducedMotion ? 1 : 1 - Math.exp(-dt * 5));
+      this.camera.lookAt(this.cameraTarget);
+    } else if (this.previewActor) {
       this.previewActor.rotation.y += reducedMotion ? 0 : dt * 0.25;
       this.camera.position.lerp(innerWidth < 620 ? this.desiredCamera.set(6, 4.8, 9.5) : this.desiredCamera.set(4.5, 3.8, 7), 1 - Math.exp(-dt * 7));
       this.cameraTarget.lerp(innerWidth < 620 ? this.desiredTarget.set(0, 0.65, 0) : this.desiredTarget.set(-1.2, 1.8, 0.7), 1 - Math.exp(-dt * 7));
@@ -441,7 +484,6 @@ export class World {
       const zoom = cameraZoom(this.camera.aspect);
       const desired = this.desiredCamera.set(focus.x + 9.5 * zoom, 0.8 + 10 * zoom, focus.z - 1.5 + 15 * zoom);
       const target = this.desiredTarget.set(focus.x, 0.8, focus.z - 1.5);
-      if (this.launchTime != null) { target.y += Math.min(9, this.rocket.position.y * 0.7); desired.y += Math.min(6, this.rocket.position.y * 0.4); }
       const damping = reducedMotion ? 1 : 1 - Math.exp(-dt * 4.5);
       this.camera.position.lerp(desired, damping);
       this.cameraTarget.lerp(target, damping);

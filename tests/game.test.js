@@ -8,11 +8,13 @@ import { createProgress, earnedUpgrades, recordResult } from "../src/rules.js";
 import { EXPEDITIONS } from "../src/expedition-data.js";
 import { EQUIPMENT, equipItem, normalizeEquipment, equipmentStats } from "../src/equipment.js";
 import { mapMarkers, mapPoint } from "../src/minimap.js";
+import { challengeStatus, fieldChallenge } from "../src/mission-report.js";
+import { VICTORY_DURATION } from "../src/presentation.js";
 
 function harness(progress = createProgress()) {
   const mission = new THREE.Group();
   const world = {
-    mission, cameraYaw: Math.PI / 6, launches: 0,
+    mission, cameraYaw: Math.PI / 6,
     clearMission: () => mission.clear(),
     createActor: (_name, p, _scale, parent = mission) => {
       const object = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial());
@@ -20,7 +22,7 @@ function harness(progress = createProgress()) {
     },
     createMarker: () => { const group = new THREE.Group(); group.userData.ring = new THREE.Group(); mission.add(group); return group; },
     createRoute: () => { const line = new THREE.Group(); mission.add(line); return line; },
-    release: object => object.removeFromParent(), pulse: () => {}, launchRocket: () => { world.launches++; },
+    release: object => object.removeFromParent(), pulse: () => {},
   };
   const input = { enabled: false, actions: new Set(), clear() { this.actions.clear(); }, consume(action) { return this.actions.delete(action); }, movement: () => ({ x: 0, y: 0 }) };
   const ui = { outcome: null, message() {}, dialogue() {}, showGame() { this.outcome = null; }, prompt(text) { this.promptText = text; }, updateHUD() {}, setProgress() {}, modal(value) { this.outcome = value; } };
@@ -94,15 +96,143 @@ test("all fifteen mission objectives can reach completion through their actions"
       game.updateFinale(0);
       assert.equal(game.phase, "launch");
       move(game, game.rocketGoal); game.interact();
-      assert.equal(world.launches, 1);
-      assert.equal(game.phase, "celebrate");
-      game.update(5.1);
+      assert.equal(game.phase, "complete");
+      assert.ok(game.progress.completed.includes("siege:signalbreak"), "finale is saved before departure");
     }
     assert.equal(game.running, false, `${item.stage.id} must end`);
     assert.equal(ui.outcome?.eyebrow, "Mission complete", `${item.stage.id}: ${ui.outcome?.text}`);
   }
   assert.equal(game.progress.completed.length, 15);
   assert.equal(earnedUpgrades(game.progress).freeRoam, true);
+});
+
+test("every victory saves once before a skippable, gameplay-frozen departure", () => {
+  for (const item of [...ALL_STAGES, BRAWL, ...EXPEDITIONS]) {
+    const { game, world, ui, input } = harness();
+    let saves = 0, launches = 0;
+    game.save = () => saves++;
+    world.startCelebration = () => launches++;
+    ui.showCelebration = (_name, skip) => { ui.skip = skip; };
+    ui.hideCelebration = () => {};
+    game.begin(item); game.finish(true, "Well done");
+    assert.equal(saves, 1, item.stage.id);
+    assert.equal(launches, 1);
+    assert.equal(game.running, false);
+    assert.equal(input.enabled, false);
+    assert.ok(game.pendingResult);
+    const time = game.time, shields = game.shields, position = game.player.x;
+    input.actions.add("pulse"); input.actions.add("interact");
+    game.update(0.5);
+    assert.equal(game.time, time); assert.equal(game.shields, shields); assert.equal(game.player.x, position);
+    ui.skip(); ui.skip(); game.finish(true, "Duplicate");
+    assert.equal(saves, 1); assert.equal(launches, 1);
+    assert.equal(game.pendingResult, null);
+    assert.ok(ui.outcome);
+  }
+});
+
+test("departure timeout, replay and stale skip cannot reopen an earlier result", () => {
+  const { game, world, ui } = harness();
+  world.startCelebration = () => {};
+  ui.showCelebration = (_name, skip) => { ui.skip = skip; };
+  ui.hideCelebration = () => {};
+  game.begin(findStage("wake")); game.finish(true, "First");
+  const staleSkip = ui.skip;
+  game.begin(findStage("trail")); staleSkip(); game.update(0);
+  assert.equal(ui.outcome, null); assert.equal(game.running, true);
+  game.finish(true, "Second"); game.update(VICTORY_DURATION);
+  assert.equal(ui.outcome.title, "Follow the Light");
+  game.stop(); assert.equal(game.pendingResult, null);
+});
+
+test("failure has no launch and arcade returns to its own title", () => {
+  const { game, world, ui } = harness();
+  world.startCelebration = () => assert.fail("A failure must not launch");
+  ui.showCelebration = () => assert.fail("A failure must not celebrate");
+  game.begin(BRAWL); game.finish(false, "Time expired");
+  assert.equal(ui.outcome.eyebrow, "Mission incomplete");
+  assert.equal(ui.outcome.actions[1].label, "Back to title");
+  assert.equal(game.progress.brawlBest, 0);
+});
+
+test("storage failure keeps the win in session without claiming it was saved", () => {
+  const { game, world, ui } = harness();
+  let persisted;
+  game.save = () => false;
+  world.startCelebration = () => {};
+  ui.showCelebration = (_name, _skip, saved) => { persisted = saved; };
+  game.begin(findStage("wake")); game.finish(true, "Complete");
+  assert.equal(persisted, false);
+  assert.ok(game.progress.completed.includes("signal:wake"));
+  game.completeVictory(); assert.match(ui.outcome.text, /session only/);
+});
+
+test("an expired or unshielded direct victory request becomes a failure", () => {
+  for (const field of ["time", "shields"]) {
+    const { game, ui } = harness(); game.begin(findStage("wake"));
+    game[field] = 0; game.finish(true, "Too late");
+    assert.equal(ui.outcome.eyebrow, "Mission incomplete");
+    assert.equal(game.progress.completed.length, 0);
+  }
+});
+
+test("an arcade field challenge awards exactly 500 points once", () => {
+  const { game, ui } = harness(); game.begin(BRAWL);
+  game.finish(true, "Complete"); const withoutBonus = ui.outcome.stats[0][0];
+  game.begin(BRAWL); game.metrics.recruited = 1;
+  game.finish(true, "Complete");
+  assert.equal(ui.outcome.stats[0][0], withoutBonus + 500);
+  const best = game.progress.brawlBest;
+  game.finish(true, "Duplicate"); assert.equal(game.progress.brawlBest, best);
+});
+
+test("replays distinguish this run's medals from the persistent best", () => {
+  const { game, ui } = harness();
+  const item = findStage("wake");
+  game.progress = recordResult(game.progress, item.chapter, item.stage, 85, true);
+  game.begin(item); game.time = 1; game.finish(true, "Complete");
+  assert.deepEqual(ui.outcome.stats.slice(0, 2), [["◆", "this run"], ["◆◆◆", "best medals"]]);
+  assert.ok(game.progress.completed.includes("signal:wake"));
+  assert.equal(ui.outcome.actions[0].label, "Next mission");
+});
+
+test("field challenges count successful calls, repairs and distinct freezes only", () => {
+  const { game } = harness(); game.begin(EXPEDITIONS[1]);
+  assert.equal(fieldChallenge(game.stage).id, "freeze");
+  const enemies = [0, 1, 2].map(i => game.spawnEnemy(false, i));
+  enemies.forEach((e, i) => { e.x = game.player.x + i; e.z = game.player.z + 3; });
+  game.combat.freezeCharges = 2;
+  assert.equal(game.combat.freeze(), true); assert.equal(game.metrics.frozenEnemies, 3);
+  game.combat.freeze(); assert.equal(game.metrics.frozenEnemies, 3);
+  assert.equal(challengeStatus(game).done, true);
+  game.combat.whistles = 0; game.combat.callAnimals(); assert.equal(game.metrics.calls, 0);
+  game.combat.whistles = 1; game.combat.callAnimals(); assert.equal(game.metrics.calls, 1);
+  game.disableEntity(enemies[0]); move(game, enemies[0]);
+  game.combat.scrap = 0; game.combat.repair(); assert.equal(game.metrics.recruited, 0);
+  game.combat.scrap = 2; game.combat.repair(); assert.equal(game.metrics.recruited, 1);
+  game.combat.repair(); assert.equal(game.metrics.recruited, 1);
+});
+
+test("missing challenges never block victory and healing cannot erase damage", () => {
+  const { game, ui } = harness(); game.begin(findStage("little-wave"));
+  game.damagePlayer(); game.shields = game.upgrades.maxShields;
+  assert.equal(challengeStatus(game).done, false);
+  game.finish(true, "Rescued"); assert.equal(ui.outcome.eyebrow, "Mission complete");
+  assert.match(ui.outcome.text, /not earned this run/);
+});
+
+test("boss stops at its charge endpoint and rushing dogs keep their heading", () => {
+  const { game } = harness(); game.begin(findStage("captain"));
+  const boss = game.boss;
+  Object.assign(boss, { x: 0, z: 0, chargeX: 0.2, chargeZ: 0, state: "charge", stateTime: 1 });
+  game.updateBoss(0.1, boss);
+  assert.equal(boss.x, 0.2); assert.equal(boss.state, "exposed");
+  game.begin(BRAWL);
+  const dog = game.spawnEnemy(false, 1);
+  Object.assign(dog, { x: 0, z: 0, attackState: "rush", attackTime: 0.5, rushX: 1, rushZ: 0 });
+  game.player.x = -4; game.player.z = -4;
+  game.combat.moveEnemy(dog, game.player, 0.05);
+  assert.equal(dog.object.rotation.y, Math.PI / 2);
 });
 
 test("search patrol kills do not replace energy cells", () => {

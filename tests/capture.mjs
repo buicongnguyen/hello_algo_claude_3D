@@ -104,6 +104,26 @@ try {
   await mobile.evaluate(() => { const api = window.__ROBOT_BEACH__; api.game.begin(api.expeditions[2]); api.ui.hideDialogue(); });
   await mobile.waitForTimeout(1000);
   await mobile.screenshot({ path: join(OUT, "15-expedition-landscape.png") });
+  const stageClear = () => {
+    const { game, world, catalog, ui } = window.__ROBOT_BEACH__;
+    game.begin(catalog[0]);
+    for (const cell of game.entities.filter(e => e.kind === "cell")) game.collect(cell);
+    game.player.x = game.goal.x; game.player.z = game.goal.z; game.interact();
+    ui.hideDialogue();
+    world.update(1.8, null);
+  };
+  await page.evaluate(stageClear);
+  await page.screenshot({ path: join(OUT, "17-departure-desktop.png") });
+  await page.getByRole("button", { name: "View results · Skip launch", exact: true }).click();
+  await page.screenshot({ path: join(OUT, "18-results-desktop.png") });
+  await mobile.setViewportSize({ width: 390, height: 844 });
+  await mobile.evaluate(stageClear);
+  await mobile.screenshot({ path: join(OUT, "19-departure-portrait.png") });
+  await mobile.getByRole("button", { name: "View results · Skip launch", exact: true }).click();
+  await mobile.screenshot({ path: join(OUT, "20-results-portrait.png") });
+  await mobile.setViewportSize({ width: 844, height: 390 });
+  await mobile.evaluate(stageClear);
+  await mobile.screenshot({ path: join(OUT, "21-departure-landscape.png") });
   // Inspection-only close-up: gameplay keeps the compact proportions.
   await page.addStyleTag({ content: "#app > :not(#game) { visibility: hidden !important; }" });
   await page.evaluate(() => {
@@ -121,6 +141,16 @@ try {
     world.update();
   });
   await page.screenshot({ path: join(OUT, "16-detail-inspection.png") });
+  await page.evaluate(() => {
+    const { world } = window.__ROBOT_BEACH__;
+    world.clearMission(); world.landmarks.visible = false;
+    for (const [name, x] of [["kai", -2.5], ["bolt", 0], ["zombie_dog", 2.5]]) {
+      const actor = world.createActor(name, { x, z: 0 }, 1, world.mission, { nativeScale: true });
+      actor.rotation.y = -0.55;
+    }
+    world.camera.position.set(0, 4.3, 9); world.camera.lookAt(0, 1, 0); world.update();
+  });
+  await page.screenshot({ path: join(OUT, "22-robot-dog-inspection.png") });
   console.log(`Visual captures written to ${OUT}`);
 } finally {
   if (browser) await browser.close();

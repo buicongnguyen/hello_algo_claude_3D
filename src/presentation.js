@@ -5,6 +5,7 @@ export const MODEL_SCALE = Object.freeze({
   energy_cell: 0.76, crab: 0.72, octopus: 0.72, starfish: 0.67, snail: 0.68, clam: 0.7,
   coral_cluster: 0.8, reef_arch: 0.8, salvage_tower: 0.8, moon_mushroom: 0.8,
   software_disc: 0.74, prism_armor: 0.72, twin_thrusters: 0.72, halo_antenna: 0.72,
+  starship: 0.85,
 });
 
 export function actorScale(name, scale = 1, nativeScale = false) {
@@ -21,4 +22,15 @@ export function cameraZoom(aspect) {
 
 export function actorHeight(object, localHeight) {
   return object.position.y + object.scale.y * localHeight;
+}
+
+export const VICTORY_DURATION = 4.4;
+export function departureHeight(age, reducedMotion = false) {
+  const t = Math.max(0, Math.min(VICTORY_DURATION, age) - 1.1);
+  return 0.65 + (reducedMotion ? Math.min(2.5, t) : t * t * 1.8);
+}
+
+export function limbPhase(name, quadruped = false) {
+  const side = name.includes("_L") ? 1 : -1;
+  return side * (quadruped && name.includes("_B") ? -1 : 1) * (name.startsWith("Shoulder") ? -1 : 1);
 }

@@ -3,6 +3,7 @@ import { earnedUpgrades, isUnlocked, stageKey } from "./rules.js";
 import { EXPEDITIONS } from "./expedition-data.js";
 import { EQUIPMENT, PAINTS } from "./equipment.js";
 import { Minimap } from "./minimap.js";
+import { fieldChallenge } from "./mission-report.js";
 
 export class UI {
   constructor(progress, callbacks) {
@@ -57,6 +58,7 @@ export class UI {
   }
 
   showOnly(id) {
+    this.hideCelebration();
     this.hideDialogue();
     if (id !== "workshopScreen") this.callbacks.preview?.(false);
     this.screens.forEach(screen => document.querySelector(`#${screen}`).classList.toggle("hidden", screen !== id));
@@ -149,22 +151,28 @@ export class UI {
     document.querySelector("#briefTitle").textContent = item.stage.name;
     document.querySelector("#briefStory").textContent = item.stage.story;
     document.querySelector("#briefObjective").textContent = item.stage.objective;
+    document.querySelector("#briefChallenge").textContent = `Optional challenge · ${fieldChallenge(item.stage)?.text || "Explore at your own pace"}. ${["brawl", "expedition"].includes(item.stage.type) ? "+500 score on victory." : "Earn the third medal."}`;
     document.querySelector("#briefReward").textContent = item.stage.type === "expedition" ? `Discover · ${item.stage.reward}` : item.stage.type === "brawl" ? "Weapons · Freeze Pops · Crab crew · Repaired teammates" : item.stageIndex === 2 ? `Chapter reward · ${item.chapter.reward}` : `Next · ${item.chapter.stages[item.stageIndex + 1]?.name || item.chapter.reward}`;
   }
 
   showGame(item) {
+    this.hideCelebration();
+    document.querySelector("#modal").classList.add("hidden");
     this.screens.forEach(screen => document.querySelector(`#${screen}`).classList.add("hidden"));
     this.hud.classList.remove("hidden");
     this.touch.classList.toggle("hidden", !matchMedia("(pointer: coarse)").matches);
     this.write("hudChapter", item.stage.type === "expedition" ? `Expedition ${item.stageIndex + 1} · ${item.stage.theme}` : item.stage.type === "brawl" ? "Beach Brawl · survive the party" : `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`);
     this.write("hudTitle", item.stage.name);
     this.write("hudObjective", item.stage.objective);
+    this.write("fieldChallenge", "");
   }
 
   updateHUD(state) {
     this.write("hudTime", state.untimed ? "—" : Math.max(0, Math.ceil(state.time)));
     this.write("hudProgress", state.progressText);
     this.write("hudProgressIcon", state.progressIcon || "⚡");
+    document.querySelector("#fieldChallenge").classList.toggle("hidden", !state.challenge);
+    if (state.challenge) this.write("fieldChallenge", `${state.challenge.goal && state.challenge.done ? "✓" : "◇"} Optional · ${state.challenge.label}`);
     this.write("hudShield", `${"◆".repeat(state.shields)}${"◇".repeat(Math.max(0, state.maxShields - state.shields))}`);
     const combat = state.combat;
     const active = Boolean(combat?.enabled);
@@ -254,7 +262,27 @@ export class UI {
     document.querySelector("#dialogue").classList.add("hidden");
   }
 
+  showCelebration(stageName, onSkip, saved = true) {
+    this.hideDialogue();
+    clearTimeout(this.messageTimer);
+    this.hud.classList.add("hidden");
+    this.touch.classList.add("hidden");
+    document.querySelector("#modal").classList.add("hidden");
+    document.querySelector("#celebrationStage").textContent = stageName;
+    document.querySelector("#celebrationSave").textContent = saved ? "Stage clear · progress saved" : "Stage clear · progress kept this session";
+    const button = document.querySelector("#skipCelebration");
+    button.onclick = onSkip;
+    document.querySelector("#celebration").classList.remove("hidden");
+    button.focus();
+  }
+
+  hideCelebration() {
+    document.querySelector("#celebration").classList.add("hidden");
+    document.querySelector("#skipCelebration").onclick = null;
+  }
+
   modal({ icon, eyebrow, title, text, stats = [], actions = [] }) {
+    this.hideCelebration();
     this.hideDialogue();
     const modal = document.querySelector("#modal");
     document.querySelector("#modalIcon").textContent = icon;

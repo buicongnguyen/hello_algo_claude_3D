@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { actorHeight } from "./presentation.js";
 
-const aimHeight = entity => actorHeight(entity.object, entity.variant === "drone" ? 0.38 : entity.variant === "dog" ? 0.8 : 1.35);
+const aimHeight = entity => actorHeight(entity.object, entity.variant === "drone" ? 0.38 : entity.variant === "dog" ? 1.15 : 1.35);
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const hostile = entity => entity.active && ["enemy", "boss"].includes(entity.kind);
@@ -102,7 +102,7 @@ export class Combat {
     const grip = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.45, 0.35), new THREE.MeshStandardMaterial({ color: 0x16344b }));
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.26, 0.85, 10), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6 }));
     barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.18, 0.32);
-    this.gear.add(grip, barrel); this.gear.position.set(-0.78, 1.18, 0.3);
+    this.gear.add(grip, barrel); this.gear.position.set(-0.68, 1.18, 0.3);
     this.game.player.object.add(this.gear);
   }
 
@@ -250,7 +250,8 @@ export class Combat {
     if (radius > 18) { enemy.x *= 18 / radius; enemy.z *= 18 / radius; }
     const height = enemy.variant === "drone" ? (enemy.attackState === "rush" ? 0.95 : 1.85 + Math.sin(g.elapsed * 5 + enemy.x) * 0.2) : 0.55;
     enemy.object.position.set(enemy.x, height, enemy.z);
-    enemy.object.rotation.y = Math.atan2(target.x - enemy.x, target.z - enemy.z);
+    enemy.object.rotation.y = attackingPlayer && ["windup", "rush"].includes(enemy.attackState)
+      ? Math.atan2(enemy.rushX, enemy.rushZ) : Math.atan2(target.x - enemy.x, target.z - enemy.z);
     g.world.animateActor?.(enemy.object, g.elapsed + enemy.x, moving);
     enemy.object.traverse(child => { if (child.name.startsWith("Rotor")) child.rotation.y += dt * 28; });
     return !attackingPlayer || enemy.attackState === "rush";
@@ -263,6 +264,7 @@ export class Combat {
     this.freezeCharges--;
     this.game.world.pulse(center, 5.5, 0xa3f6ff);
     for (const enemy of this.enemies()) if (distance(center, enemy) <= 5.5) {
+      if (!enemy.challengeFrozen) { enemy.challengeFrozen = true; this.game.metrics.frozenEnemies++; }
       enemy.frozen = enemy.boss ? 1.5 : 5;
       if (!enemy.boss) { enemy.attackState = "recover"; enemy.attackTime = 0.6; }
       if (enemy.warningLine && !enemy.boss) { this.game.world.release(enemy.warningLine); enemy.warningLine = null; }
@@ -279,6 +281,7 @@ export class Combat {
   callAnimals() {
     if (!this.enabled || this.whistles <= 0) { this.game.ui.message("Pick up a gold Crab Whistle first.", true); return false; }
     this.whistles--;
+    this.game.metrics.calls++;
     if (!this.animals.length) for (let i = 0; i < 3; i++) {
       const p = { x: this.game.player.x + (i - 1) * 1.2, z: this.game.player.z + 1.2 };
       const object = this.game.world.createActor("crab", p, 1);
@@ -318,6 +321,7 @@ export class Combat {
     if (team.length >= 3) { this.game.ui.message("Your robot team is full: three happy helpers.", true); return true; }
     if (this.scrap < 2) { this.game.ui.message("Repair needs 2 scrap. Down another zombie bot first.", true); return true; }
     this.scrap -= 2;
+    this.game.metrics.recruited++;
     Object.assign(enemy, { kind: "ally", active: true, repairable: false, cooldown: 0.3, frozen: 0, index: team.length });
     enemy.object.rotation.z = 0;
     enemy.object.traverse(child => { if (child.isSprite) child.visible = false; });
@@ -379,7 +383,7 @@ export class Combat {
   objective() {
     if (!this.enabled) return null;
     // Optional equipment must not hide a required build, delivery or launch action.
-    if (["prepare", "ready", "launch", "celebrate"].includes(this.game.phase) || this.game.goal && !this.game.goal.locked) return null;
+    if (["prepare", "ready", "launch", "complete"].includes(this.game.phase) || this.game.goal && !this.game.goal.locked) return null;
     if (!["brawl", "expedition"].includes(this.game.stage.type) && !this.enemies().length) return null;
     if (!this.weapon || this.ammo <= 0) {
       const item = this.nearest(this.game.player, Infinity, this.pickups.filter(p => p.active && WEAPONS[p.type]));

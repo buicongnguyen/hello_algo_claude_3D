@@ -2,6 +2,7 @@
 
 import bpy
 import json
+import hashlib
 import math
 from pathlib import Path
 
@@ -130,28 +131,29 @@ def robot(name="KAI_Robot", hostile=False):
     r = root(name)
     shell = CORAL if hostile else WHITE
     light = ORANGE if hostile else CYAN
-    cube("Torso", (0, 0, 1.35), (0.48, 0.30, 0.58), shell, 0.18, r)
-    cube("ChestEmitter", (0, -0.32, 1.42), (0.20, 0.045, 0.17), light, 0.06, r)
-    sphere("Head", (0, 0, 2.15), (0.48, 0.42, 0.42), shell, r)
-    cube("VisorFrame", (0, -0.39, 2.14), (0.35, 0.075, 0.14), NAVY, 0.07, r)
+    cube("Torso", (0, 0, 1.35), (0.40, 0.25, 0.53), shell, 0.14, r)
+    cube("ChestEmitter", (0, -0.27, 1.42), (0.16, 0.035, 0.14), light, 0.05, r)
+    cylinder("Neck", (0, 0, 1.92), 0.14, 0.16, NAVY, r)
+    sphere("Head", (0, 0, 2.2), (0.40, 0.35, 0.34), shell, r)
+    cube("VisorFrame", (0, -0.32, 2.2), (0.29, 0.06, 0.12), NAVY, 0.06, r)
     for x in (-0.15, 0.15):
-        cube("Optic", (x, -0.468, 2.16), (0.075, 0.025, 0.07), light, 0.03, r)
-    cube("Smile", (0, -0.446, 2.02), (0.1, 0.018, 0.015), light, 0.012, r)
-    cube("BellyPanel", (0, -0.305, 1.04), (0.33, 0.025, 0.11), NAVY, 0.045, r)
+        cube("Optic", (x * 0.8, -0.384, 2.22), (0.06, 0.018, 0.06), light, 0.025, r)
+    cube("Smile", (0, -0.382, 2.12), (0.08, 0.016, 0.012), light, 0.01, r)
+    cube("BellyPanel", (0, -0.26, 1.04), (0.28, 0.02, 0.09), NAVY, 0.04, r)
     for x in (-0.2, 0, 0.2):
-        cube("PowerVent", (x, -0.34, 1.04), (0.045, 0.015, 0.05), light, 0.015, r)
-    cube("BackPanel", (0, 0.307, 1.42), (0.32, 0.028, 0.32), NAVY, 0.065, r)
+        cube("PowerVent", (x * 0.8, -0.285, 1.04), (0.035, 0.012, 0.04), light, 0.012, r)
+    cube("BackPanel", (0, 0.258, 1.42), (0.27, 0.02, 0.29), NAVY, 0.05, r)
     for z in (1.25, 1.4, 1.55):
-        cube("CoolingVent", (0, 0.344, z), (0.23, 0.015, 0.025), light, 0.015, r)
-    for x in (-0.38, 0.38):
+        cube("CoolingVent", (0, 0.285, z), (0.19, 0.012, 0.02), light, 0.012, r)
+    for x in (-0.32, 0.32):
         for z in (1.03, 1.7):
-            sphere("PanelRivet", (x, -0.31, z), (0.035, 0.025, 0.035), GOLD, r)
+            sphere("PanelRivet", (x, -0.26, z), (0.025, 0.018, 0.025), GOLD, r)
     for side in (-1, 1):
         suffix = "L" if side == -1 else "R"
-        sphere(f"Shoulder_{side}", (side * 0.62, 0, 1.66), (0.16, 0.16, 0.16), NAVY, r)
+        sphere(f"Shoulder_{side}", (side * 0.52, 0, 1.66), (0.14, 0.14, 0.14), NAVY, r)
         arm = root(f"ShoulderPivot_{suffix}")
         arm.parent = r
-        arm.location = (side * 0.62, 0, 1.66)
+        arm.location = (side * 0.52, 0, 1.66)
         cylinder(f"Arm_{side}", (side * 0.10, 0, -0.41), 0.12, 0.72, shell, arm)
         sphere(f"Hand_{side}", (side * 0.10, 0, -0.82), (0.16, 0.16, 0.16), light, arm)
         torus("ElbowCollar", (side * 0.1, 0, -0.4), 0.125, 0.032, NAVY, arm)
@@ -171,27 +173,42 @@ def dog(hostile=False):
     r = root("Zombie_Dog" if hostile else "BOLT_Dog")
     shell = CORAL if hostile else WHITE
     light = ORANGE if hostile else CYAN
-    cube("Body", (0, 0, 0.72), (0.72, 0.33, 0.35), shell, 0.16, r)
-    cube("Head", (0, -0.62, 0.92), (0.38, 0.35, 0.34), shell, 0.14, r)
-    cube("Visor", (0, -0.97, 0.95), (0.25, 0.04, 0.08), light, 0.04, r)
-    cube("Nose", (0, -0.995, 0.8), (0.1, 0.06, 0.075), NAVY, 0.04, r)
-    cube("SpinePanel", (0, 0, 1.075), (0.42, 0.22, 0.025), NAVY, 0.04, r)
-    for x in (-0.3, 0, 0.3):
-        cube("SpineLight", (x, 0, 1.11), (0.04, 0.17, 0.018), light, 0.015, r)
-    if not hostile:
-        for side in (-1, 1):
-            cube("FloppyEar", (side * 0.38, -0.55, 1.06), (0.09, 0.18, 0.26), NAVY, 0.065, r)
-    if hostile:
-        for x in (-0.26, 0.26):
-            cone("PointyEar", (x, -0.45, 1.4), 0.15, 0.02, 0.4, NAVY, r, 6)
-    for x in (-0.48, 0.48):
-        for y in (-0.20, 0.22):
-            hip = root(f"Hip_{'L' if x < 0 else 'R'}_{y}")
+    cube("Body", (0, 0.02, 1.02), (0.32, 0.66, 0.28), shell, 0.16, r)
+    sphere("Chest", (0, -0.46, 1.1), (0.34, 0.29, 0.4), shell, r)
+    cylinder("Neck", (0, -0.62, 1.37), 0.21, 0.48, NAVY, r, rotation=(0.25, 0, 0))
+    torus("Collar", (0, -0.64, 1.43), 0.23, 0.055, light, r)
+    cube("DogHead", (0, -0.78, 1.68), (0.26, 0.30, 0.24), shell, 0.12, r)
+    cube("Muzzle", (0, -1.12, 1.53), (0.19, 0.25, 0.12), shell, 0.075, r)
+    cube("Nose", (0, -1.37, 1.56), (0.13, 0.045, 0.08), NAVY, 0.04, r)
+    cube("MouthSeam", (0, -1.31, 1.43), (0.14, 0.08, 0.018), NAVY, 0.015, r)
+    for side in (-1, 1):
+        sphere("EyeSocket", (side * 0.23, -0.98, 1.75), (0.075, 0.07, 0.08), NAVY, r)
+        sphere("DogOptic", (side * 0.245, -1.03, 1.76), (0.042, 0.03, 0.045), light, r)
+        if hostile:
+            cone("PointyEar", (side * 0.22, -0.6, 2.03), 0.13, 0.025, 0.4, NAVY, r, 6)
+        else:
+            ear = cube("FloppyEar", (side * 0.31, -0.63, 1.73), (0.075, 0.14, 0.24), NAVY, 0.065, r)
+            ear.rotation_euler.y = side * 0.3
+        cube("FlankPanel", (side * 0.323, 0.12, 1.05), (0.023, 0.37, 0.14), NAVY, 0.025, r)
+        cube("FlankStripe", (side * 0.35, 0.12, 1.05), (0.012, 0.24, 0.033), light, 0.012, r)
+    cube("SpinePanel", (0, 0.08, 1.3), (0.20, 0.38, 0.025), NAVY, 0.04, r)
+    for y in (-0.18, 0.08, 0.34):
+        cube("SpineLight", (0, y, 1.33), (0.14, 0.035, 0.016), light, 0.012, r)
+    for x in (-0.29, 0.29):
+        for y in (-0.43, 0.48):
+            hip = root(f"Hip_{'L' if x < 0 else 'R'}_{'F' if y < 0 else 'B'}")
             hip.parent = r
-            hip.location = (x, y, 0.56)
-            cylinder("Leg", (0, 0, -0.26), 0.08, 0.52, NAVY, hip)
-            cube("Paw", (0, -0.025, -0.5), (0.13, 0.17, 0.07), shell, 0.04, hip)
-    cylinder("Tail", (0, 0.48, 1.02), 0.06, 0.7, light, r, rotation=(math.radians(48), 0, 0))
+            hip.location = (x, y, 0.93)
+            sphere("HipJoint", (0, 0, 0), (0.13, 0.13, 0.13), NAVY, hip)
+            cylinder("UpperLeg", (0, 0, -0.2), 0.085, 0.4, shell, hip)
+            sphere("KneeJoint", (0, 0, -0.42), (0.1, 0.1, 0.1), NAVY, hip)
+            cylinder("LowerLeg", (0, -0.025, -0.62), 0.065, 0.36, NAVY, hip)
+            cube("Paw", (0, -0.085, -0.85), (0.115, 0.20, 0.075), shell, 0.04, hip)
+    tail = root("TailPivot")
+    tail.parent = r
+    tail.location = (0, 0.64, 1.12)
+    tube("Tail", [(0, 0, 0), (0, 0.22, 0.17), (0, 0.37, 0.44)], 0.065, NAVY, tail)
+    sphere("TailLight", (0, 0.37, 0.44), (0.075, 0.075, 0.075), light, tail)
     return r
 
 
@@ -473,19 +490,19 @@ def software_disc():
 
 def prism_armor():
     r = root("Prism_Armor")
-    cube("ChestPlate", (0, -0.37, 1.34), (0.53, 0.09, 0.38), PURPLE, 0.12, r)
-    sphere("ChestGem", (0, -0.49, 1.43), (0.23, 0.10, 0.25), GOLD, r)
+    cube("ChestPlate", (0, -0.3, 1.34), (0.43, 0.065, 0.34), PURPLE, 0.1, r)
+    sphere("ChestGem", (0, -0.39, 1.43), (0.18, 0.07, 0.19), GOLD, r)
     for side in (-1, 1):
-        sphere("PrismShoulder", (side * 0.62, 0, 1.75), (0.29, 0.34, 0.2), PINK, r)
-        cube("ArmorInset", (side * 0.38, -0.472, 1.33), (0.045, 0.025, 0.2), PEARL, 0.018, r)
+        sphere("PrismShoulder", (side * 0.52, 0, 1.75), (0.20, 0.24, 0.15), PINK, r)
+        cube("ArmorInset", (side * 0.32, -0.37, 1.33), (0.025, 0.015, 0.16), PEARL, 0.012, r)
     for z in (1.13, 1.28):
-        cube("ArmorVent", (0, -0.47, z), (0.2, 0.018, 0.02), NAVY, 0.012, r)
+        cube("ArmorVent", (0, -0.37, z), (0.16, 0.015, 0.015), NAVY, 0.01, r)
     return r
 
 
 def twin_thrusters():
     r = root("Twin_Thrusters")
-    cube("Backpack", (0, 0.39, 1.4), (0.44, 0.22, 0.38), NAVY, 0.08, r)
+    cube("Backpack", (0, 0.34, 1.4), (0.37, 0.17, 0.34), NAVY, 0.07, r)
     for side in (-1, 1):
         cylinder("ThrusterTank", (side * 0.35, 0.55, 1.42), 0.2, 0.95, GOLD, r, 12)
         for z in (1.12, 1.7):
@@ -501,6 +518,30 @@ def halo_antenna():
     for side in (-1, 1):
         cylinder("HaloSupport", (side * 0.35, 0, 2.68), 0.045, 0.5, GOLD, r, 8)
     sphere("HaloStar", (0, 0, 3.05), (0.14, 0.14, 0.14), CYAN, r)
+    return r
+
+
+def starship():
+    r = root("AURORA_Starship")
+    sphere("FlightHull", (0, 0, 1.0), (0.67, 1.35, 0.54), WHITE, r)
+    sphere("Cockpit", (0, -0.63, 1.3), (0.43, 0.62, 0.28), NAVY, r)
+    sphere("Canopy", (0, -0.68, 1.47), (0.35, 0.49, 0.25), CYAN, r)
+    for side in (-1, 1):
+        wing = cube("Wing", (side * 0.89, 0.35, 0.94), (0.65, 0.6, 0.07), WHITE, 0.12, r)
+        wing.rotation_euler.z = side * 0.35
+        cube("WingStripe", (side * 1.08, 0.4, 1.015), (0.31, 0.05, 0.015), CORAL, 0.015, r)
+        cylinder("EnginePod", (side * 0.86, 0.57, 0.83), 0.23, 0.75, NAVY, r)
+        torus("EngineRim", (side * 0.86, 0.57, 0.47), 0.23, 0.045, GOLD, r)
+        flame = root(f"Exhaust_{side}")
+        flame.parent = r
+        flame.location = (side * 0.86, 0.57, 0.42)
+        cone("ExhaustGlow", (0, 0, -0.37), 0.015, 0.19, 0.74, CYAN, flame)
+        cylinder("LandingLeg", (side * 0.51, -0.4, 0.41), 0.055, 0.62, NAVY, r)
+        cube("LandingFoot", (side * 0.51, -0.4, 0.09), (0.16, 0.26, 0.06), NAVY, 0.04, r)
+    fin = cube("TailFin", (0, 0.94, 1.5), (0.07, 0.42, 0.43), CORAL, 0.1, r)
+    fin.rotation_euler.x = -0.25
+    for y in (-0.12, 0.13, 0.38):
+        cube("HullVent", (0, y, 1.54), (0.17, 0.04, 0.018), NAVY, 0.014, r)
     return r
 
 
@@ -529,6 +570,7 @@ builders = {
     "prism_armor": prism_armor,
     "twin_thrusters": twin_thrusters,
     "halo_antenna": halo_antenna,
+    "starship": starship,
 }
 
 def descendants(obj):
@@ -606,6 +648,7 @@ for asset_name, asset_root in roots.items():
         obj.data.calc_loop_triangles()
         triangles += len(obj.data.loop_triangles)
     report.append({"name": asset_name, "file": path.name, "bytes": path.stat().st_size,
+                   "sha256": hashlib.sha256(path.read_bytes()).hexdigest()[:16],
                    "meshFaces": sum(len(obj.data.polygons) for obj in meshes),
                    "triangles": triangles, "meshes": len(meshes)})
     asset_root.location = original_location

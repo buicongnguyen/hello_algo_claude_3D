@@ -17,8 +17,8 @@ function loadProgress() {
 }
 
 function saveProgress(progress) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(progress)); }
-  catch { ui?.message("Progress kept for this session; browser storage is unavailable.", true); }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(progress)); return true; }
+  catch { ui?.message("Progress kept for this session; browser storage is unavailable.", true); return false; }
 }
 
 let progress = loadProgress();
@@ -75,8 +75,9 @@ ui = new UI(progress, {
 game = new Game(world, input, ui, progress, next => {
   progress = next;
   game.progress = next;
-  saveProgress(next);
+  const saved = saveProgress(next);
   world.setCampaign(next);
+  return saved;
 });
 
 try {
@@ -84,6 +85,7 @@ try {
   world.setCampaign(progress);
   ui.loading(1, "ready");
   setTimeout(() => ui.showTitle(), 280);
+  if (world.failedModels.length) ui.message(`${world.failedModels.length} models could not load. Refresh to retry; the game remains playable.`, true);
 } catch (error) {
   console.error(error);
   document.querySelector("#loadStatus").textContent = "The 3D island could not start. Try a WebGL-enabled browser.";

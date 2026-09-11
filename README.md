@@ -22,7 +22,11 @@ This is a playable browser-game foundation, with a documented roadmap toward a m
 - Keyboard and touch controls, reduced motion and adaptive quality.
 - Responsive UI designed for desktop and mobile.
 - Camera-relative movement, target compass, numbered world labels and persistent chapter upgrades on replay.
-- BOLT companion following, a visible rocket-launch ending and unlocked free roam.
+- Slimmer KAI and taller canine robot dogs with articulated diagonal trotting and tail animation.
+- A Blender-built AURORA starship takes off after every victory, with a skippable congratulations sequence and current-run results.
+- Optional field challenges encourage animal helpers, repairs, clean play and crowd control. Campaign challenges award the third medal; arcade/expedition challenges add 500 points on victory.
+- Progress is recorded before departure, current medals are separated from best medals, and story victories can lead directly to the next briefing.
+- BOLT companion following, the original festival rocket and unlocked free roam.
 
 ## Controls
 
@@ -44,6 +48,7 @@ The minimap is oriented like your movement controls. White arrow = KAI, red circ
 See [COMBAT_UPDATE.md](./COMBAT_UPDATE.md) for the combat design, balance rules, resource limits and verification.
 See [EXPEDITIONS_PLAN.md](./EXPEDITIONS_PLAN.md) for the new scenarios, equipment rules, Blender asset plan and logic review.
 See [VISUAL_CLARITY.md](./VISUAL_CLARITY.md) for compact model proportions, wider mobile framing, detailed Blender models and rendering safeguards.
+See [STAGE_POLISH_PLAN.md](./STAGE_POLISH_PLAN.md) for the game evaluation, detailed implementation plan, logic review and verification of character design, optional challenges and stage endings.
 
 ## Development
 

@@ -137,7 +137,7 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
 .modal-icon { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 20px; background: var(--gold); color: var(--navy); font-size: 32px; margin-bottom: 22px; }
 .modal-card h2 { margin: 0 0 14px; font-size: clamp(32px, 5vw, 52px); }
 .modal-card > p:not(.eyebrow) { color: #bad8e2; line-height: 1.6; }
-.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin: 22px 0; }
+.stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 22px 0; }
 .stat-grid > div { padding: 13px; border-radius: 14px; background: rgba(255,255,255,.07); display: grid; gap: 4px; }
 .stat-grid strong { color: var(--gold); font-size: 18px; }
 .stat-grid span { color: #a8c8d2; font-size: 10px; text-transform: uppercase; }
@@ -292,4 +292,25 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+.brief-challenge { color: var(--gold); font-size: 13px; line-height: 1.5; }
+.field-challenge { position: absolute; left: 18px; bottom: 20px; max-width: min(370px, 30vw); padding: 11px 15px; border-radius: 14px; color: var(--gold); font-size: 12px; }
+#modalText { white-space: pre-line; }
+.celebration { position: fixed; inset: 0; z-index: 16; background: linear-gradient(0deg, rgba(2,23,39,.35), transparent 50%); }
+.departure-label { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); padding: 11px 22px; border-radius: 30px; color: var(--cyan); font-size: 12px; font-weight: 800; letter-spacing: .15em; white-space: nowrap; }
+.celebration-card { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); text-align: center; padding: 20px 26px; border-radius: 26px; }
+.celebration-card h2 { font-size: clamp(30px, 5vw, 48px); margin: 0 0 8px; color: var(--gold); }
+#celebrationStage { margin-bottom: 7px; font-size: 18px; font-weight: 800; }
+.departure-copy { margin-bottom: 14px; font-size: 13px; color: #c6e4ec; line-height: 1.4; }
+@media (max-width: 620px) {
+  .field-challenge { left: 9px; right: 9px; bottom: 268px; max-width: none; font-size: 11px; padding: 9px 11px; }
+  .celebration-card { bottom: 16px; padding: 18px; }
+  .departure-label { top: 16px; font-size: 9px; padding: 10px 16px; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .field-challenge { left: 12px; bottom: 126px; max-width: 250px; font-size: 10px; padding: 8px; }
+  .celebration-card { bottom: 12px; left: auto; right: 12px; transform: none; width: 310px; padding: 16px; }
+  .celebration-card h2 { font-size: 28px; }
+  .departure-label { left: 12px; transform: none; top: 12px; font-size: 9px; padding: 9px 13px; }
 }
