@@ -32,8 +32,10 @@ try {
   const modelRequests = [];
   page.on("request", request => { if (request.url().includes(".glb")) modelRequests.push(request.url()); });
   page.on("pageerror", error => errors.push(error.message));
+  page.on("console", message => { if (message.type() === "error" && /THREE|WebGL|shader/i.test(message.text())) errors.push(message.text()); });
   await page.goto(URL, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: /Signalbreak/i }).waitFor({ state: "visible", timeout: 20_000 });
+  if (!process.env.FALLBACK_ONLY) {
   await page.getByRole("button", { name: "Mission map" }).click();
   if (await page.locator(".chapter-card").count() !== 5) throw new Error("Expected five chapter cards");
   if (await page.locator(".stage-dots button").count() !== 15) throw new Error("Expected fifteen mission buttons");
@@ -43,12 +45,16 @@ try {
   if (!await page.locator("#hud").isVisible()) throw new Error("Mission HUD is not visible");
   const before = await page.evaluate(() => ({ x: window.__ROBOT_BEACH__.game.player.x, z: window.__ROBOT_BEACH__.game.player.z }));
   await page.keyboard.down("KeyW");
-  await page.waitForTimeout(350);
+  // Wait for simulation progress, not a fixed wall-clock sleep during software-GPU compilation.
+  await page.waitForFunction(start => {
+    const player = window.__ROBOT_BEACH__.game.player;
+    return Math.hypot(player.x - start.x, player.z - start.z) >= .4;
+  }, before, { timeout: 5000 });
   await page.keyboard.up("KeyW");
   const after = await page.evaluate(() => ({ x: window.__ROBOT_BEACH__.game.player.x, z: window.__ROBOT_BEACH__.game.player.z }));
   if (Math.hypot(after.x - before.x, after.z - before.z) < 0.4) throw new Error("Keyboard movement did not move KAI");
   await page.keyboard.press("KeyQ");
-  await page.waitForTimeout(80);
+  await page.waitForFunction(() => window.__ROBOT_BEACH__.game.pulseCooldown > 0, null, { timeout: 5000 });
   const cooldown = await page.evaluate(() => window.__ROBOT_BEACH__.game.pulseCooldown);
   if (cooldown <= 0) throw new Error("Pulse action did not trigger");
   await page.keyboard.press("Escape");
@@ -60,6 +66,13 @@ try {
     return { loaded: api.world.models.size, failed: api.world.failedModels, actualBlender: Boolean(api.world.models.get("kai").getObjectByName("KAI_Robot")), limbs: api.game.player.object.userData.limbs.length };
   });
   if (assets.loaded !== 25 || assets.failed.length || !assets.actualBlender || assets.limbs !== 4) throw new Error(`Blender asset/pivot regression: ${JSON.stringify(assets)}`);
+  const art = await page.evaluate(() => {
+    const { world } = window.__ROBOT_BEACH__;
+    return { environment: Boolean(world.scene.environment), normal: Boolean(world.models.get("kai").getObjectByName("Torso").material.normalMap),
+      ...world.renderer.info.render };
+  });
+  if (!art.environment || !art.normal || art.calls > 450 || art.triangles > 400_000) throw new Error(`Art rendering budget or surfaces failed: ${JSON.stringify(art)}`);
+  console.log(`Mission art check: ${JSON.stringify(art)}`);
   if (modelRequests.length !== 25 || modelRequests.some(url => !/\.glb\?v=[a-f0-9]{16}$/.test(url))) throw new Error("Models are not using content-versioned URLs");
   const modelScale = await page.evaluate(() => window.__ROBOT_BEACH__.game.player.object.scale.y);
   if (Math.abs(modelScale - 0.94 * 0.82) > 0.001) throw new Error(`Gameplay KAI is not using compact proportions: ${modelScale}`);
@@ -298,20 +311,29 @@ try {
   await page.getByRole("button", { name: "Robot Workshop", exact: true }).click();
   if (!await page.getByRole("button", { name: "Candy pink", exact: true }).getAttribute("aria-pressed").then(v => v === "true")) throw new Error("Paint did not survive a browser reload");
   if (!await page.evaluate(() => window.__ROBOT_BEACH__.game.progress.equipment.owned.includes("armor"))) throw new Error("Discovered armor did not survive reload");
+  }
 
+  // The fallback test is independent. Release the previous WebGL context first.
+  await page.close();
   const fallbackPage = await browser.newPage({ viewport: { width: 800, height: 600 } });
   fallbackPage.on("pageerror", error => errors.push(error.message));
+  fallbackPage.on("console", message => { if (message.type() === "error" && /THREE|WebGL|shader/i.test(message.text())) errors.push(message.text()); });
   await fallbackPage.route("**/models/manifest.json", route => route.abort());
   await fallbackPage.goto(URL, { waitUntil: "networkidle" });
   // The loading screen also says Signalbreak; wait for initialized game state.
-  await fallbackPage.waitForFunction(() => window.__ROBOT_BEACH__?.world.models.size === 25, null, { timeout: 20_000 });
+  try {
+    await fallbackPage.waitForFunction(() => window.__ROBOT_BEACH__?.world.models.size === 25, null, { timeout: 20_000 });
+  } catch (error) {
+    console.error("Fallback initialization:", await fallbackPage.evaluate(() => ({ status: document.querySelector("#loadStatus")?.textContent, models: window.__ROBOT_BEACH__?.world.models.size })), errors);
+    throw error;
+  }
   await fallbackPage.locator("#gameTitle").waitFor({ state: "visible", timeout: 20_000 });
   const fallbackAssets = await fallbackPage.evaluate(() => ({ count: window.__ROBOT_BEACH__.world.models.size, failed: window.__ROBOT_BEACH__.world.failedModels.length }));
   if (fallbackAssets.count !== 25 || fallbackAssets.failed) throw new Error("Optional manifest failure prevented real model loading");
   await fallbackPage.close();
 
   if (errors.length) throw new Error(`Browser errors:\n${errors.join("\n")}`);
-  console.log("Smoke test passed: 25 Blender models, versioned assets, campaign, Brawl, expeditions, Workshop, minimap, input, saved/skippable starship victories, next-stage flow and resource stability.");
+  console.log(process.env.FALLBACK_ONLY ? "Fallback-only check passed: all 25 real Blender models loaded without the optional manifest." : "Smoke test passed: 25 Blender models, versioned assets, campaign, Brawl, expeditions, Workshop, minimap, input, saved/skippable starship victories, next-stage flow and resource stability.");
 } finally {
   if (browser) await browser.close();
   server?.kill("SIGTERM");

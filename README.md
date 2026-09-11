@@ -1,6 +1,6 @@
 # Robot Beach 3D: Signalbreak
 
-A standalone Blender + Three.js successor to Robot Beach Adventures. Explore one connected low-poly island as KAI, recover five Aurora fragments, rescue beach friends, build defenses, race the skyway and relight the lighthouse.
+A standalone Blender + Three.js successor to Robot Beach Adventures. Explore a stylized coastal island as KAI, recover five Aurora fragments, rescue beach friends, build defenses, race the skyway and relight the lighthouse.
 
 [Play Signalbreak](https://buicongnguyen.github.io/hello_algo_claude_3D/) · [Design reassessment and production roadmap](./DESIGN_REVIEW.md)
 
@@ -18,6 +18,7 @@ This is a playable browser-game foundation, with a documented roadmap toward a m
 - Freeze Pops, a summoned crab crew, and scrap-funded repairs that turn defeated robots into teammates.
 - One consistent control scheme across collection, signal puzzles, rescue, defense, racing and boss encounters.
 - Blender-authored GLB characters and landmarks with procedural fallbacks.
+- Shaped robot armor, gripper hands, canine hydraulic legs, swept starship wings, curved palm leaflets and fluted seashells. Distinct metal/rubber/glass finishes, outdoor reflections and shared sand/wood/water micro-surfaces.
 - Persistent campaign progress, medals and chapter upgrades.
 - Keyboard and touch controls, reduced motion and adaptive quality.
 - Responsive UI designed for desktop and mobile.
@@ -49,6 +50,7 @@ See [COMBAT_UPDATE.md](./COMBAT_UPDATE.md) for the combat design, balance rules,
 See [EXPEDITIONS_PLAN.md](./EXPEDITIONS_PLAN.md) for the new scenarios, equipment rules, Blender asset plan and logic review.
 See [VISUAL_CLARITY.md](./VISUAL_CLARITY.md) for compact model proportions, wider mobile framing, detailed Blender models and rendering safeguards.
 See [STAGE_POLISH_PLAN.md](./STAGE_POLISH_PLAN.md) for the game evaluation, detailed implementation plan, logic review and verification of character design, optional challenges and stage endings.
+See [ART_DIRECTION.md](./ART_DIRECTION.md) for the crafted-model art pass, realistic-material goals, review fixes and browser asset budgets.
 
 ## Development
 

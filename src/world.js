@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { dressRobot } from "./equipment.js";
+import { createSurfaces, finishMaterial, coastalEnvironment, grassGeometry, groundCoverTexture } from "./surfaces.js";
 import { actorScale, cameraZoom, CAMERA_YAW, departureHeight, limbPhase, VICTORY_DURATION } from "./presentation.js";
 
 const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm", "octopus", "starfish", "snail", "clam", "coral_cluster", "reef_arch", "salvage_tower", "moon_mushroom", "software_disc", "prism_armor", "twin_thrusters", "halo_antenna", "starship"];
@@ -67,7 +68,11 @@ export class World {
     }));
     for (const model of this.models.values()) model.traverse(child => {
       if (child.geometry) this.assetResources.add(child.geometry);
-      if (child.material) this.assetResources.add(child.material);
+      for (const material of child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : []) {
+        finishMaterial(material, this.surfaces);
+        this.assetResources.add(material);
+        for (const value of Object.values(material)) if (value?.isTexture) this.assetResources.add(value);
+      }
     });
     this.pulseGeometry = new THREE.RingGeometry(0.75, 1, 32);
     this.assetResources.add(this.pulseGeometry);
@@ -75,7 +80,12 @@ export class World {
   }
 
   buildEnvironment() {
-    const hemi = new THREE.HemisphereLight(0xc5ecff, 0xb38957, 1.55);
+    this.surfaces = createSurfaces(this.renderer);
+    for (const surface of Object.values(this.surfaces)) for (const texture of Object.values(surface)) this.assetResources.add(texture);
+    this.environmentTarget = coastalEnvironment(this.renderer);
+    this.scene.environment = this.environmentTarget.texture;
+    this.scene.environmentIntensity = .3;
+    const hemi = new THREE.HemisphereLight(0xc5ecff, 0xb38957, .45);
     this.scene.add(hemi);
     this.sun = new THREE.DirectionalLight(0xffe4bb, 2.2);
     this.sun.position.set(-12, 25, 10);
@@ -89,7 +99,7 @@ export class World {
     this.sun.shadow.camera.bottom = -28;
     this.scene.add(this.sun);
 
-    const waterMat = new THREE.MeshPhysicalMaterial({ color: 0x168bc0, roughness: 0.18, metalness: 0.05, transparent: true, opacity: 0.83 });
+    const waterMat = new THREE.MeshStandardMaterial({ color: 0x168bc0, roughness: 0.24, metalness: 0.15, normalMap: this.surfaces.water.normalMap, normalScale: new THREE.Vector2(.65, .65) });
     this.water = new THREE.Mesh(new THREE.CircleGeometry(70, 64), waterMat);
     this.water.rotation.x = -Math.PI / 2;
     this.water.position.y = -0.55;
@@ -98,21 +108,21 @@ export class World {
 
     const island = new THREE.Mesh(
       new THREE.CylinderGeometry(20, 23, 1.15, 64),
-      new THREE.MeshStandardMaterial({ color: 0xf0c878, roughness: 0.94 }),
+      new THREE.MeshStandardMaterial({ color: 0xf0c878, roughness: 0.94, ...this.surfaces.sand, normalScale: new THREE.Vector2(.2, .2) }),
     );
     island.position.y = -0.15;
     island.receiveShadow = true;
     this.shared.add(island);
     this.island = island;
 
-    const inner = new THREE.Mesh(new THREE.CircleGeometry(18.5, 64), new THREE.MeshStandardMaterial({ color: 0xf6db91, roughness: 0.98 }));
+    const inner = new THREE.Mesh(new THREE.CircleGeometry(18.5, 64), new THREE.MeshStandardMaterial({ color: 0xf6db91, roughness: 0.98, ...this.surfaces.sand, normalScale: new THREE.Vector2(.35, .35) }));
     inner.rotation.x = -Math.PI / 2;
     inner.position.y = 0.44;
     inner.receiveShadow = true;
     this.shared.add(inner);
     this.ground = inner;
 
-    const boardwalk = new THREE.Mesh(new THREE.BoxGeometry(11, 0.28, 3.2), new THREE.MeshStandardMaterial({ color: 0x9e6236, roughness: 0.9 }));
+    const boardwalk = new THREE.Mesh(new THREE.BoxGeometry(11, 0.28, 3.2), new THREE.MeshStandardMaterial({ color: 0x806044, roughness: 0.9, ...this.surfaces.wood, normalScale: new THREE.Vector2(.3, .3) }));
     boardwalk.position.set(2, 0.65, -8.5);
     boardwalk.receiveShadow = true;
     this.shared.add(boardwalk);
@@ -124,7 +134,15 @@ export class World {
     cliff.receiveShadow = true;
     this.shared.add(cliff);
 
-    const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ roughness: 1 }), 34);
+    const rockGeometry = new THREE.IcosahedronGeometry(1, 1);
+    const rockPositions = rockGeometry.attributes.position;
+    for (let i = 0; i < rockPositions.count; i++) {
+      const x = rockPositions.getX(i), y = rockPositions.getY(i), z = rockPositions.getZ(i);
+      const stretch = .9 + .12 * Math.sin(x * 11 + y * 7 + z * 13);
+      rockPositions.setXYZ(i, x * stretch, y * stretch, z * stretch);
+    }
+    rockGeometry.computeVertexNormals();
+    const rocks = new THREE.InstancedMesh(rockGeometry, new THREE.MeshStandardMaterial({ roughness: 1, ...this.surfaces.sand, normalScale: new THREE.Vector2(.3, .3) }), 34);
     const rock = new THREE.Object3D();
     for (let i = 0; i < 34; i += 1) {
       const angle = i * 2.399;
@@ -145,19 +163,21 @@ export class World {
     this.foam = foam;
 
     // Low ground patches give each landmark an identity without hiding targets.
+    const coverTexture = groundCoverTexture(); this.assetResources.add(coverTexture);
+    const coverMaterial = new THREE.MeshStandardMaterial({ color: 0x718047, roughness: 1, map: coverTexture, transparent: true, depthWrite: false });
     for (const [x, z, radius] of [[-15, -2, 2.3], [15, 4, 2.4], [10, 13, 2.3], [-9, 14, 2.6], [13, -9, 2.8]]) {
-      const patch = new THREE.Mesh(new THREE.CircleGeometry(radius, 14), new THREE.MeshStandardMaterial({ color: 0x9fad60, roughness: 1 }));
+      const patch = new THREE.Mesh(new THREE.PlaneGeometry(radius * 2, radius * 2), coverMaterial);
       patch.rotation.x = -Math.PI / 2; patch.position.set(x, 0.45, z); this.shared.add(patch);
     }
-    const grasses = new THREE.InstancedMesh(new THREE.ConeGeometry(0.14, 0.58, 4), new THREE.MeshStandardMaterial({ color: 0x659d54, roughness: 1 }), 70);
+    const grasses = new THREE.InstancedMesh(grassGeometry(), new THREE.MeshStandardMaterial({ color: 0x6b8242, roughness: 1, side: THREE.DoubleSide }), 70);
     for (let i = 0; i < 70; i++) {
       const angle = i * 2.399;
       const radius = 16.3 + (i % 4) * 0.5;
-      rock.position.set(Math.cos(angle) * radius, 0.7, Math.sin(angle) * radius);
+      rock.position.set(Math.cos(angle) * radius, 0.45, Math.sin(angle) * radius);
       rock.scale.setScalar(0.6 + (i % 3) * 0.3); rock.updateMatrix(); grasses.setMatrixAt(i, rock.matrix);
     }
     this.shared.add(grasses);
-    const planks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.13, 0.035, 3.1), new THREE.MeshStandardMaterial({ color: 0x784a2a }), 20);
+    const planks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.49, 0.055, 3.1), new THREE.MeshStandardMaterial({ color: 0xa27c58, roughness: .86, ...this.surfaces.wood, normalScale: new THREE.Vector2(.3, .3) }), 20);
     for (let i = 0; i < 20; i++) {
       rock.position.set(-3.1 + i * 0.53, 0.81, -8.5); rock.scale.setScalar(1); rock.updateMatrix(); planks.setMatrixAt(i, rock.matrix);
     }
@@ -214,6 +234,7 @@ export class World {
     this.scene.background.setHex(palette[0]); this.scene.fog.color.setHex(palette[1]);
     this.ground.material.color.setHex(palette[2]); this.island.material.color.setHex(palette[2]);
     this.sun.color.setHex(palette[3]); this.sun.intensity = theme === "moonpool" ? 1.6 : 2.2;
+    this.scene.environmentIntensity = theme === "moonpool" ? .16 : .3;
     if (this.landmarks) this.landmarks.visible = !theme;
     this.boardwalk.visible = this.planks.visible = !theme;
     this.obstacles = theme ? [] : [...(this.defaultObstacles || [])];
@@ -403,7 +424,9 @@ export class World {
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       for (const material of materials) if (material && !this.assetResources.has(material)) {
         disposable.add(material);
-        if (material.map) disposable.add(material.map);
+        for (const value of Object.values(material)) {
+          if (value?.isTexture && !this.assetResources.has(value)) disposable.add(value);
+        }
       }
     });
     for (const resource of disposable) resource.dispose();
@@ -435,6 +458,7 @@ export class World {
   update(dt, focus, reducedMotion = false) {
     this.clock += dt;
     this.water.position.y = -0.55 + Math.sin(this.clock * 0.7) * 0.06;
+    if (!reducedMotion) this.surfaces.water.normalMap.offset.set(this.clock * .007, this.clock * .003);
     if (this.foam) this.foam.scale.setScalar(1 + Math.sin(this.clock * 0.65) * 0.012);
     this.water.material.color.setHSL(0.55 + Math.sin(this.clock * 0.15) * 0.012, 0.73, 0.42);
     if (this.beamPivot) this.beamPivot.rotation.y += dt * 0.22;

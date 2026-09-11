@@ -26,7 +26,9 @@ try {
   browser = await chromium.launch({ executablePath, headless: true, args: ["--use-angle=swiftshader", "--enable-webgl"] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
+  await page.waitForFunction(() => window.__ROBOT_BEACH__?.world.models.size === 25);
   await page.getByRole("heading", { name: /Signalbreak/i }).waitFor({ state: "visible", timeout: 20_000 });
+  if (!process.env.ART_ONLY) {
   await page.screenshot({ path: join(OUT, "01-title.png") });
   await page.getByRole("button", { name: "Mission map" }).click();
   await page.screenshot({ path: join(OUT, "02-map.png"), fullPage: true });
@@ -124,6 +126,24 @@ try {
   await mobile.setViewportSize({ width: 844, height: 390 });
   await mobile.evaluate(stageClear);
   await mobile.screenshot({ path: join(OUT, "21-departure-landscape.png") });
+  await mobile.close();
+  }
+  if (process.env.ART_ONLY) {
+    await page.evaluate(() => {
+      const { game, world, ui, catalog } = window.__ROBOT_BEACH__;
+      game.begin(catalog[0]); ui.hideDialogue();
+      for (let i = 0; i < 30; i++) world.update(.1, game.player);
+    });
+    await page.screenshot({ path: join(OUT, "24-art-mission-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => {
+      const { game, world } = window.__ROBOT_BEACH__;
+      world.setQuality("auto");
+      for (let i = 0; i < 30; i++) world.update(.1, game.player);
+    });
+    await page.screenshot({ path: join(OUT, "25-art-mission-portrait.png") });
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
   // Inspection-only close-up: gameplay keeps the compact proportions.
   await page.addStyleTag({ content: "#app > :not(#game) { visibility: hidden !important; }" });
   await page.evaluate(() => {
@@ -151,6 +171,17 @@ try {
     world.camera.position.set(0, 4.3, 9); world.camera.lookAt(0, 1, 0); world.update();
   });
   await page.screenshot({ path: join(OUT, "22-robot-dog-inspection.png") });
+  await page.evaluate(() => {
+    const { world } = window.__ROBOT_BEACH__;
+    world.clearMission(); world.landmarks.visible = false; world.boardwalk.visible = world.planks.visible = false;
+    for (const [name, x, scale] of [["palm", -3.8, .95], ["starship", 0, 1.25], ["lighthouse", 4, .55]]) {
+      const actor = world.createActor(name, { x, z: 0 }, scale, world.mission, { nativeScale: true });
+      actor.rotation.y = -.35;
+    }
+    world.camera.position.set(0, 6, 12); world.camera.lookAt(0, 1.8, 0); world.update();
+  });
+  await page.screenshot({ path: join(OUT, "23-coastal-models.png") });
+  console.log("Art inspection render:", await page.evaluate(() => ({ ...window.__ROBOT_BEACH__.world.renderer.info.render })));
   console.log(`Visual captures written to ${OUT}`);
 } finally {
   if (browser) await browser.close();

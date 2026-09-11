@@ -46,10 +46,11 @@ test("equipment inherits KAI scale exactly once and workshop stays full detail",
 test("detailed Blender exports stay within a browser asset budget", () => {
   const manifest = JSON.parse(readFileSync(new URL("../public/models/manifest.json", import.meta.url)));
   assert.equal(manifest.assets.length, Object.keys(MODEL_SCALE).length);
-  assert.ok(manifest.assets.reduce((sum, asset) => sum + asset.bytes, 0) < 2_000_000);
+  assert.ok(manifest.assets.reduce((sum, asset) => sum + asset.bytes, 0) < 4_000_000);
+  assert.ok(manifest.assets.find(asset => asset.name === "palm").meshes <= 4, "static leaflets must batch by material");
   for (const asset of manifest.assets) {
-    assert.ok(asset.triangles > 0 && asset.triangles <= 6000, `${asset.name}: triangle budget`);
-    assert.ok(asset.meshes <= 30, `${asset.name}: rigid-part batching`);
+    assert.ok(asset.triangles > 0 && asset.triangles <= 12000, `${asset.name}: triangle budget`);
+    assert.ok(asset.meshes <= 40, `${asset.name}: rigid-part batching`);
     const bytes = readFileSync(new URL(`../public/models/${asset.file}`, import.meta.url));
     assert.equal(bytes.length, asset.bytes);
     assert.equal(bytes.toString("utf8", 0, 4), "glTF");
