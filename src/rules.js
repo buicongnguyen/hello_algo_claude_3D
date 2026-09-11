@@ -16,8 +16,25 @@ export function createProgress(raw = {}) {
     expeditionResults: Object.fromEntries(["coral", "scrapyard", "moonpool"].filter(id => Number.isFinite(raw.expeditionResults?.[id]) && raw.expeditionResults[id] >= 0).map(id => [id, raw.expeditionResults[id]])),
     completed: Array.isArray(raw.completed) ? [...new Set(raw.completed.filter(value => typeof value === "string"))] : [],
     results: raw.results && typeof raw.results === "object" ? { ...raw.results } : {},
-    settings: { quality: "auto", reducedMotion: false, ...(raw.settings || {}) },
+    settings: { quality: "auto", reducedMotion: false, ...(raw.settings || {}), campaignMode: raw.settings?.campaignMode === "challenge" ? "challenge" : "story" },
+    checkpoint: normalizeCheckpoint(raw.checkpoint, raw.completed),
   };
+}
+
+export function normalizeCheckpoint(raw, completed = []) {
+  if (!raw || raw.stage !== "siege:signalbreak" || !Array.isArray(completed) || !completed.includes("siege:core")) return null;
+  if (!["story", "challenge"].includes(raw.mode)) return null;
+  if (!Number.isInteger(raw.coreHealth) || raw.coreHealth < 1 || raw.coreHealth > 5) return null;
+  if (!Number.isFinite(raw.time) || raw.time < 0 || raw.time > 180 || raw.mode === "challenge" && raw.time <= 0) return null;
+  if (!Number.isFinite(raw.elapsed) || raw.elapsed < 0 || raw.elapsed > 86400) return null;
+  const metrics = {};
+  for (const key of ["damageTaken", "recruited", "calls", "frozenEnemies"]) metrics[key] = Number.isFinite(raw.metrics?.[key]) ? Math.max(0, Math.min(100000, Math.floor(raw.metrics[key]))) : 0;
+  return { stage: raw.stage, mode: raw.mode, coreHealth: raw.coreHealth, time: raw.time, elapsed: raw.elapsed, metrics };
+}
+
+export function availableCheckpoint(progress) {
+  const checkpoint = normalizeCheckpoint(progress.checkpoint, progress.completed);
+  return checkpoint?.mode === progress.settings.campaignMode ? checkpoint : null;
 }
 
 export function earnedUpgrades(progress) {

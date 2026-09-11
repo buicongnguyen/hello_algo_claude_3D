@@ -1,3 +1,5 @@
+import { minimumRelayTurns } from "./relay.js";
+
 export function fieldChallenge(stage) {
   if (stage.type === "roam") return null;
   if (stage.type === "expedition") return stage.mode === "salvage"
@@ -5,8 +7,10 @@ export function fieldChallenge(stage) {
     : { id: "crew", text: "Call the animal crew", goal: 1 };
   if (["combat", "brawl"].includes(stage.type)) return { id: "repair", text: "Recruit a robot teammate", goal: 1 };
   if (stage.type === "sequence") return { id: "sequence", text: "No wrong signal activations" };
+  if (stage.type === "relay") return { id: "relay", text: `Connect in ${minimumRelayTurns(stage)} quarter-turns`, limit: minimumRelayTurns(stage) };
+  if (stage.id === "storm") return { id: "clean", text: "Finish the storm route without shield damage" };
   if (stage.type === "finale") return { id: "core", text: "Keep all 5 core-integrity points" };
-  if (["collect", "race-collect", "race"].includes(stage.type)) return { id: "speed", text: "Finish with half the clock left" };
+  if (["collect", "race-collect", "race"].includes(stage.type)) return { id: "speed", text: `Finish within ${Math.floor(stage.time / 2)} active seconds` };
   return { id: "clean", text: "Take no shield damage" };
 }
 
@@ -17,6 +21,7 @@ export function challengeStatus(game) {
   const count = challenge.id === "freeze" ? metrics.frozenEnemies || 0 : challenge.id === "crew" ? metrics.calls || 0 : metrics.recruited || 0;
   const done = challenge.goal ? count >= challenge.goal
     : challenge.id === "sequence" ? game.wrongActions === 0
+    : challenge.id === "relay" ? (game.relayTurns || 0) <= challenge.limit
     : challenge.id === "core" ? game.core?.health === 5
     : challenge.id === "speed" ? game.time >= game.stage.time / 2
     : (metrics.damageTaken || 0) === 0;

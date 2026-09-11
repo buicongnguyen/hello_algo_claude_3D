@@ -11,9 +11,10 @@ export function mapMarkers(game, target) {
     if (!e.active || e.carried) continue;
     if (["enemy", "boss"].includes(e.kind)) markers.push({ ...e, type: "enemy" });
     else if (["ally", "creature"].includes(e.kind)) markers.push({ ...e, type: "friend" });
-    else if (["cell", "node"].includes(e.kind)) markers.push({ ...e, type: "loot" });
+    else if (["cell", "node", "relay-node"].includes(e.kind)) markers.push({ ...e, type: "loot" });
   }
   for (const p of game.combat?.pickups || []) if (p.active) markers.push({ ...p, type: "loot" });
+  for (const shelter of game.shelters || []) markers.push({ ...shelter, type: "friend" });
   for (const p of game.expedition?.discoveries || []) if (p.active) markers.push({ ...p, type: "loot" });
   for (const p of game.expedition?.friends || []) if (p.active && !p.carried) markers.push({ ...p, type: "friend" });
   if (game.expedition) {

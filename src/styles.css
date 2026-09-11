@@ -295,6 +295,18 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
 }
 
 .brief-challenge { color: var(--gold); font-size: 13px; line-height: 1.5; }
+.brief-location { color: var(--gold); text-transform: uppercase; letter-spacing: .12em; font-size: 12px; font-weight: 800; }
+.brief-stakes { color: #fff4d2; font-weight: 700; line-height: 1.4; }
+.brief-beats { padding-left: 22px; color: #d2e8ef; font-size: 14px; line-height: 1.6; }
+.brief-beats li { padding: 3px 0 3px 4px; }
+.campaign-mode { display: grid; gap: 7px; font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--cyan); }
+.campaign-mode select { width: 100%; padding: 10px; border-radius: 10px; background: #11374d; border: 1px solid var(--line); color: white; }
+.brief-pace { font-size: 12px; line-height: 1.5; color: #bed7df; margin: 10px 0 18px; }
+.brief-card { display: flex; flex-direction: column; overflow: hidden; }
+.brief-content { overflow-y: auto; min-height: 0; overscroll-behavior: contain; scrollbar-width: thin; padding: 4px; }
+.brief-actions { flex-shrink: 0; padding-top: 14px; margin-top: 12px; border-top: 1px solid var(--line); }
+.radio-controls { display: grid; gap: 4px; }
+.radio-controls button { padding: 0 10px; min-height: 34px; font-size: 11px; }
 .field-challenge { position: absolute; left: 18px; bottom: 20px; max-width: min(370px, 30vw); padding: 11px 15px; border-radius: 14px; color: var(--gold); font-size: 12px; }
 #modalText { white-space: pre-line; }
 .celebration { position: fixed; inset: 0; z-index: 16; background: linear-gradient(0deg, rgba(2,23,39,.35), transparent 50%); }
@@ -303,6 +315,9 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
 .celebration-card h2 { font-size: clamp(30px, 5vw, 48px); margin: 0 0 8px; color: var(--gold); }
 #celebrationStage { margin-bottom: 7px; font-size: 18px; font-weight: 800; }
 .departure-copy { margin-bottom: 14px; font-size: 13px; color: #c6e4ec; line-height: 1.4; }
+@media (pointer: coarse) and (min-width: 621px) and (min-height: 501px) {
+  .field-challenge { bottom: 130px; }
+}
 @media (max-width: 620px) {
   .field-challenge { left: 9px; right: 9px; bottom: 268px; max-width: none; font-size: 11px; padding: 9px 11px; }
   .celebration-card { bottom: 16px; padding: 18px; }

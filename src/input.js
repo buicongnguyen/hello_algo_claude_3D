@@ -18,6 +18,10 @@ export class InputController {
   bindKeyboard() {
     window.addEventListener("keydown", event => {
       if (!this.enabled || event.ctrlKey || event.metaKey || event.altKey) return;
+      // Radio controls retain native keyboard activation while gameplay is active.
+      // Hidden launch/menu buttons can keep focus, so only visible controls intercept input.
+      const control = event.target.closest?.("button, select, input, textarea");
+      if (control?.getClientRects().length && (["Space", "Enter"].includes(event.code) || control.matches("select, input, textarea"))) return;
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Enter"].includes(event.code)) event.preventDefault();
       this.keys.add(event.code);
       if (!event.repeat) {

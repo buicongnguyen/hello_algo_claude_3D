@@ -1,11 +1,13 @@
 import * as THREE from "three";
-import { applyHit, earnedUpgrades, medalFor, recordResult, sequenceStep } from "./rules.js";
+import { applyHit, earnedUpgrades, medalFor, recordResult, sequenceStep, availableCheckpoint } from "./rules.js";
 import { Combat } from "./combat.js";
 import { Expedition } from "./expeditions.js";
 import { dressRobot, equipmentStats } from "./equipment.js";
 import { actorHeight, VICTORY_DURATION } from "./presentation.js";
 import { challengeStatus, runSummary } from "./mission-report.js";
 import { ALL_STAGES } from "./missions.js";
+import { isStoryMode, storyFor } from "./story.js";
+import { DIRECTIONS, traceRelays } from "./relay.js";
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -23,16 +25,19 @@ export class Game {
     this.effects = [];
   }
 
-  begin(item) {
+  begin(item, { resumeCheckpoint = false } = {}) {
+    const checkpoint = resumeCheckpoint && item.stage.id === "signalbreak" ? availableCheckpoint(this.progress) : null;
     this.cancelVictory();
     this.item = item;
     this.stage = item.stage;
     this.world.clearMission();
     this.world.setScenario?.(this.stage.theme || null);
+    if (storyFor(item)) this.world.setDistrict?.(item);
     this.expedition = null;
     this.input.clear();
     this.entities = [];
     this.time = this.stage.time;
+    this.storyMode = isStoryMode(item, this.progress);
     this.elapsed = 0;
     this.progressCount = 0;
     this.sequenceIndex = 0;
@@ -45,9 +50,14 @@ export class Game {
     this.carry = null;
     this.goal = null;
     this.shelter = null;
+    this.shelters = [];
     this.finalBeacon = null;
     this.rocketGoal = null;
     this.relay = null;
+    this.relayTurns = 0;
+    this.relayLines = [];
+    this.relayState = null;
+    this.wardenRepair = null;
     this.boss = null;
     this.tide = null;
     this.core = null;
@@ -71,12 +81,13 @@ export class Game {
     this.refreshEquipment(false);
     if (this.combat.enabled && this.progress.equipment.equipped.software === "frost") this.combat.freezeCharges = 1;
     if (this.stage.type === "expedition") this.expedition = new Expedition(this);
+    if (checkpoint) this.enterWarden(checkpoint);
     this.ui.showGame(item);
     this.running = true;
     this.paused = false;
     this.input.enabled = true;
-    this.ui.dialogue(this.stage.dialogue);
-    this.ui.message("Mission started");
+    this.ui.dialogue(checkpoint ? [{ speaker: "LUMA", text: "Checkpoint restored. The core remembers its damage; your shield and Bubble Blaster are ready." }] : this.stage.dialogue);
+    this.ui.message(checkpoint ? "Warden checkpoint restored" : "Mission started");
   }
 
   refreshEquipment(preserveHealth = true) {
@@ -91,6 +102,7 @@ export class Game {
     const type = this.stage.type;
     if (["collect", "race-collect"].includes(type)) this.setupCollect(type === "race-collect");
     else if (type === "sequence") this.setupSequence();
+    else if (type === "relay") this.setupRelays();
     else if (type === "combat") this.setupCombat();
     else if (type === "rescue") this.setupRescue();
     else if (type === "defense") this.setupDefense();
@@ -135,14 +147,60 @@ export class Game {
     this.goal.marker = this.world.createMarker(this.stage.goal, 0xffd166, 1.5);
   }
 
+  setupRelays() {
+    this.relayNodes = this.stage.positions.map((position, id) => {
+      const node = this.makeEntity("relay-node", "beacon", position, .82, { id, turn: this.stage.turns[id] });
+      node.marker = this.world.createMarker(position, 0x65e5ff, 1.1);
+      const heading = new THREE.Group();
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(.32, .9, 3), new THREE.MeshBasicMaterial({ color: 0xffd166 }));
+      arrow.rotation.x = -Math.PI / 2; arrow.position.z = -1.3; heading.add(arrow);
+      heading.position.set(position.x, 1.85, position.z); this.world.mission.add(heading);
+      node.heading = heading;
+      this.world.label?.(node.object, `${String.fromCharCode(65 + id)} · ${this.stage.labels[id]}`, 0xffffff, 3);
+      this.entities.push(node); return node;
+    });
+    this.receiver = this.makeEntity("receiver", "energy_cell", this.stage.receiver, 1.2);
+    this.receiver.marker = this.world.createMarker(this.stage.receiver, 0xffd166, 1.4);
+    this.world.label?.(this.receiver.object, "RECEIVER", 0xffd166, 2.3);
+    this.world.createActor("energy_cell", this.stage.source, .85);
+    this.world.createRoute([this.stage.source, this.stage.positions[0]], 0x65e5ff, { beam: true });
+    this.refreshRelays();
+  }
+
+  refreshRelays() {
+    for (const line of this.relayLines) this.world.release?.(line);
+    this.relayState = traceRelays(this.stage.positions, this.relayNodes.map(node => node.turn), this.stage.receiver);
+    this.relayLines = this.relayState.outputs.map((output, id) => {
+      this.relayNodes[id].heading.rotation.y = -this.relayNodes[id].turn * Math.PI / 2;
+      this.relayNodes[id].heading.children[0].material.color.setHex(output.powered ? 0xffd166 : 0x71899c);
+      return this.world.createRoute([output.from, output.to], output.powered ? 0x65e5ff : 0x536778, { beam: output.powered });
+    });
+    this.progressCount = this.relayState.outputs.filter(output => output.powered && output.hit !== null).length;
+  }
+
+  turnRelay(range = 2.5) {
+    if (!this.running) return;
+    const node = [...this.relayNodes].sort((a, b) => distance(a, this.player) - distance(b, this.player))[0];
+    if (!node || distance(node, this.player) > range) return this.ui.message("Move beside a relay. Q or E turns its arrow clockwise.", true);
+    node.turn = (node.turn + 1) % 4; this.relayTurns++;
+    this.world.pulse(node, 1, 0xffd166); this.refreshRelays();
+    if (this.relayState.complete) return this.finish(true, "Every relay carries power into the receiver. The repaired network answers.");
+    this.ui.message(`Relay ${String.fromCharCode(65 + node.id)} points ${DIRECTIONS[node.turn].name}. ${this.relayState.powered.includes(node.id) ? "Follow its beam." : "It is waiting for upstream power."}`);
+  }
+
   setupRescue() {
     this.stage.positions.forEach((position, index) => {
       const creature = this.makeEntity("creature", ["crab", "starfish", "octopus", "snail", "clam"][index % 5], position, 0.88 + (index % 2) * 0.08, { id: index });
       creature.marker = this.world.createMarker(position, 0x65e5ff, 1.1);
       this.entities.push(creature);
     });
-    this.shelter = this.makeEntity("shelter", "beacon", this.stage.goal, 1.05, {});
-    this.shelter.marker = this.world.createMarker(this.stage.goal, 0x4cde8a, 2.0);
+    this.shelters = (this.stage.shelters || [this.stage.goal]).map(position => {
+      const shelter = this.makeEntity("shelter", "beacon", position, 1.05, {});
+      shelter.marker = this.world.createMarker(position, 0x4cde8a, 2.0);
+      this.world.label?.(shelter.object, "SAFE SHELTER", 0x4cde8a, 2.8);
+      return shelter;
+    });
+    this.shelter = this.shelters[0];
     const tideMat = new THREE.MeshBasicMaterial({ color: 0x1e9fe0, transparent: true, opacity: 0.25, depthWrite: false, side: THREE.DoubleSide });
     this.tide = new THREE.Mesh(new THREE.RingGeometry(12, 32, 64), tideMat);
     this.tide.rotation.x = -Math.PI / 2;
@@ -179,7 +237,7 @@ export class Game {
   }
 
   setupRace() {
-    this.gates = this.routePositions(this.stage.count).map((position, index) => {
+    this.gates = (this.stage.gatePositions || this.routePositions(this.stage.count)).map((position, index) => {
       const group = new THREE.Group();
       const color = index === 0 ? 0xffd166 : 0x65e5ff;
       const torus = new THREE.Mesh(new THREE.TorusGeometry(1.65, 0.13, 10, 36), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.6 }));
@@ -191,7 +249,7 @@ export class Game {
       this.world.mission.add(group);
       return { position, object: group, active: index === 0, index };
     });
-    this.world.createRoute(this.gates.map(gate => gate.position).concat([this.gates[0].position]), 0xffd166);
+    this.world.createRoute(this.gates.map(gate => gate.position), 0xffd166);
     if (this.stage.hazards) this.createHazards(4);
   }
 
@@ -278,13 +336,13 @@ export class Game {
       return;
     }
     this.elapsed += dt;
-    if (this.phase !== "prepare" && this.phase !== "ready") this.time -= dt;
+    if (this.phase !== "prepare" && this.phase !== "ready") this.time = this.storyMode ? Math.max(0, this.time - dt) : this.time - dt;
     this.invulnerable = Math.max(0, this.invulnerable - dt);
     this.pulseCooldown = Math.max(0, this.pulseCooldown - dt);
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
     this.dashTime = Math.max(0, this.dashTime - dt);
 
-    if (this.time <= 0) return this.finish(false, "The mission clock expired before the objective was complete.");
+    if (!this.storyMode && this.time <= 0) return this.finish(false, "The mission clock expired before the objective was complete.");
     this.updatePlayer(dt);
     this.updateHazards(dt);
     if (this.shields <= 0) return this.finish(false, "KAI's shield is empty. Dash away from red warning zones and try again.");
@@ -486,18 +544,39 @@ export class Game {
         this.spawnTimer = 2.2;
       }
       if (this.spawned >= this.finalWaveCount && !this.entities.some(entity => entity.kind === "enemy" && entity.active)) {
-        this.phase = "warden";
-        this.setupBoss(true);
-        this.ui.message("Rust Warden incoming!", true);
+        this.enterWarden();
       }
     } else if (this.phase === "warden") {
       this.updateBoss(dt, this.boss);
       if (!this.boss.active && !this.entities.some(entity => entity.kind === "enemy" && entity.active)) {
-        this.phase = "launch";
-        this.rocketGoal.locked = false;
-        this.world.createMarker({ x: -13, z: -9 }, 0xffd166, 2.2);
-        this.ui.message("Warden restored. Reach the rocket and launch!");
+        this.phase = "repair";
+        this.wardenRepair = { x: this.boss.x, z: this.boss.z };
+        this.wardenRepair.marker = this.world.createMarker(this.wardenRepair, 0x65e5ff, 1.8);
+        this.ui.dialogue([{ speaker: "LUMA", text: "Its shield is down. Install the shared-signal patch with Use. This repair costs no scrap." }]);
+        this.ui.message("Use beside the Warden to install the repair");
       }
+    }
+  }
+
+  enterWarden(checkpoint = null) {
+    if (checkpoint) {
+      this.time = checkpoint.time; this.elapsed = checkpoint.elapsed; this.core.health = checkpoint.coreHealth;
+      this.metrics = { ...checkpoint.metrics };
+    }
+    this.phase = "warden"; this.spawned = this.finalWaveCount; this.progressCount = this.finalWaveCount;
+    this.shields = this.upgrades.maxShields; this.invulnerable = 1.25;
+    this.player.x = 0; this.player.z = 7; this.player.object.position.set(0, .55, 7);
+    // Reuse the mission's crate so fresh entry and a restored checkpoint receive the same refill.
+    const starter = this.combat.pickups.find(pickup => pickup.type === "bubble");
+    starter.active = true;
+    this.combat.collect(starter);
+    this.setupBoss(true);
+    if (!checkpoint) {
+      this.progress.checkpoint = { stage: "siege:signalbreak", mode: this.storyMode ? "story" : "challenge", time: this.time, elapsed: this.elapsed, coreHealth: this.core.health, metrics: { ...this.metrics } };
+      const saved = this.save(this.progress) !== false;
+      this.ui.setProgress(this.progress);
+      this.ui.message(saved ? "Checkpoint saved · shield and Bubble Blaster ready" : "Checkpoint ready for this session · shield and Bubble Blaster ready");
+      this.ui.dialogue([{ speaker: "WARDEN", text: "Isolation protected you once. Why will you not stay where it is safe?" }, { speaker: "LUMA", text: "Because our friends are out there. KAI, dodge the fixed charge line, then attack the exposed cyan core." }]);
     }
   }
 
@@ -517,6 +596,7 @@ export class Game {
 
   pulse() {
     if (this.pulseCooldown > 0) return this.ui.message("Pulse is recharging", true);
+    if (this.stage.type === "relay") { this.pulseCooldown = .25; return this.turnRelay(this.upgrades.pulseRadius); }
     const radius = this.upgrades.pulseRadius;
     const damage = this.upgrades.pulseDamage;
     this.pulseCooldown = 1.1;
@@ -580,6 +660,14 @@ export class Game {
   }
 
   interact() {
+    if (this.stage.type === "relay") return this.turnRelay();
+    if (this.stage.type === "finale" && this.phase === "repair" && distance(this.player, this.wardenRepair) < 2.5) {
+      this.wardenRepair.marker.visible = false;
+      this.phase = "launch"; this.rocketGoal.locked = false;
+      this.world.createMarker(this.rocketGoal, 0xffd166, 2.2);
+      this.ui.dialogue([{ speaker: "WARDEN", text: "Shared-signal patch accepted. Keep the routes open. Ask before closing a door." }, { speaker: "BOLT", text: "Welcome back. You are just in time to help with the festival." }]);
+      return this.ui.message("Warden repaired · send the festival signal from the rocket");
+    }
     if (this.expedition?.interact()) return;
     if (this.finalBeacon && !this.carry && distance(this.player, this.finalBeacon) < 2.2) {
       if (this.progressCount < this.stage.count) return this.ui.message("Bring every beach friend to safety first", true);
@@ -604,7 +692,7 @@ export class Game {
 
   interactRescue() {
     if (this.carry) {
-      if (distance(this.player, this.shelter) > 2.5) return this.ui.message("Carry your friend to the green shelter", true);
+      if (!this.shelters.some(shelter => distance(this.player, shelter) <= 2.5)) return this.ui.message("Carry your friend to a green shelter", true);
       this.carry.active = false;
       this.carry.carried = false;
       this.carry.object.visible = false;
@@ -675,9 +763,11 @@ export class Game {
       return;
     }
     let text = "";
-    if (this.finalBeacon && !this.carry && this.progressCount >= this.stage.count && distance(this.player, this.finalBeacon) < 2.2) text = "E · DISABLE TIDE BEACON";
+    if (this.stage.type === "relay" && this.relayNodes.some(node => distance(this.player, node) <= 2.5)) text = "E / Q · TURN RELAY CLOCKWISE";
+    else if (this.stage.type === "finale" && this.phase === "repair" && distance(this.player, this.wardenRepair) < 2.5) text = "E · INSTALL SHARED SIGNAL · FREE REPAIR";
+    else if (this.finalBeacon && !this.carry && this.progressCount >= this.stage.count && distance(this.player, this.finalBeacon) < 2.2) text = "E · DISABLE TIDE BEACON";
     else if (this.stage.type === "rescue") {
-      if (this.carry && distance(this.player, this.shelter) < 2.5) text = "E · SET FRIEND DOWN SAFELY";
+      if (this.carry && this.shelters.some(shelter => distance(this.player, shelter) < 2.5)) text = "E · SET FRIEND DOWN SAFELY";
       else if (!this.carry && this.entities.some(entity => entity.kind === "creature" && entity.active && distance(entity, this.player) < 2.1)) text = "E · PICK UP FRIEND";
     } else if (this.stage.type === "defense" && this.phase === "prepare" && this.pads.some(pad => !pad.placed && distance(this.player, pad.position) < 2.2)) text = "E · PLACE SOLAR TURRET";
     else if (this.stage.type === "defense" && this.phase === "ready") text = "E · START DEFENSE WAVE";
@@ -691,12 +781,14 @@ export class Game {
     if (this.expedition) return this.expedition.progressText();
     if (this.stage.type === "brawl") return `Wave ${Math.max(1, this.combat.wave)} / 3 · ${this.combat.kills} / 24`;
     if (this.stage.type === "roam") return "Island restored";
+    if (this.stage.type === "relay") return `${this.progressCount}/${this.stage.count} links · ${this.relayTurns} turns`;
     if (this.stage.type === "defense" && this.phase === "ready") return "Ready · press E";
     if (this.stage.type === "defense") return this.phase === "prepare" ? `${this.progressCount} / ${this.stage.pads} turrets` : `${this.progressCount} / ${this.stage.count} scouts`;
     if (this.stage.type === "boss") return `${Math.max(0, this.boss.health)} / ${this.boss.maxHealth} core`;
     if (this.stage.type === "finale") {
       if (this.phase === "defend") return `${this.progressCount} / ${this.finalWaveCount} scouts`;
       if (this.phase === "warden") return `${Math.max(0, this.boss.health)} Warden · ${this.core.health}/5 core`;
+      if (this.phase === "repair") return "Install the repair · E";
       return "Rocket ready";
     }
     return `${this.progressCount} / ${this.stage.count}`;
@@ -708,6 +800,7 @@ export class Game {
     this.hudElapsed = 0;
     this.ui.updateHUD({
       time: this.time,
+      elapsed: this.elapsed, storyMode: this.storyMode,
       progressText: this.progressText(),
       progressIcon: this.item.chapter.icon,
       shields: this.shields,
@@ -731,11 +824,16 @@ export class Game {
       const entity = entities.filter(entity => entity.active !== false).sort((a, b) => distance(this.player, a) - distance(this.player, b))[0];
       return entity ? { ...entity, label } : null;
     };
-    if (this.carry) return { ...this.shelter, label: "Green shelter · Use to rescue" };
+    if (this.carry) return nearest(this.shelters, "Green shelter · Use to rescue");
     if (this.stage.type === "rescue") return this.progressCount >= this.stage.count && this.finalBeacon ? { ...this.finalBeacon, label: "Tide beacon · Use to disable" } : nearest(this.entities.filter(e => e.kind === "creature"), "Beach friend · Use to carry");
     if (this.stage.type === "sequence") {
       const node = this.entities.find(e => e.kind === "node" && e.id === this.sequenceIndex);
       return node ? { ...node, label: `${this.sequenceIndex + 1} · ${node.label} · Pulse` } : null;
+    }
+    if (this.stage.type === "relay") {
+      const disconnected = this.relayState.outputs.findIndex(output => output.powered && (output.hit === null || !this.relayState.receiverPowered && output.hit === 0));
+      const node = disconnected >= 0 ? this.relayNodes[disconnected] : [...this.relayNodes].sort((a, b) => distance(this.player, a) - distance(this.player, b))[0];
+      return { ...node, label: "Relay arrow · Q / Use to turn" };
     }
     if (this.stage.type === "race") {
       const gate = this.gates[this.progressCount];
@@ -744,6 +842,7 @@ export class Game {
     if (this.stage.type === "defense" && this.phase === "prepare") return nearest(this.pads.filter(p => !p.placed).map(p => p.position), "Gold pad · Use to build");
     if (this.stage.type === "defense" && this.phase === "ready") return { ...this.relay, label: "Defense ready · press Use / E" };
     if (this.stage.type === "finale" && this.phase === "launch") return { ...this.rocketGoal, label: "Festival rocket · Use to launch" };
+    if (this.stage.type === "finale" && this.phase === "repair") return { ...this.wardenRepair, label: "Warden · Use to install free repair" };
     if (this.boss?.active) return { ...this.boss, label: this.boss.state === "exposed" ? "Core exposed · Pulse now" : "Boss shielded · dodge its charge" };
     if (this.goal && !this.goal.locked) return { ...this.goal, label: this.stage.id === "wake" ? "BOLT's dock · Use to repair" : "Gold beacon · Use to repair" };
     return nearest(this.entities.filter(e => e.kind === "cell"), "Energy cell · Pulse") || nearest(this.entities.filter(e => e.kind === "enemy"), "Rust scout · Pulse to reboot");
@@ -763,9 +862,9 @@ export class Game {
 
   finish(won, text) {
     if (!this.running) return;
-    if (won && (this.time <= 0 || this.shields <= 0)) {
+    if (won && (!this.storyMode && this.time <= 0 || this.shields <= 0)) {
       won = false;
-      text = this.time <= 0 ? "The mission clock expired before the objective was complete." : "KAI's shield is empty. Try the route again.";
+      text = !this.storyMode && this.time <= 0 ? "The mission clock expired before the objective was complete." : "KAI's shield is empty. Try the route again.";
     }
     this.running = false;
     this.phase = won ? "complete" : "failed";
@@ -775,7 +874,7 @@ export class Game {
     this.ui.hideDialogue?.();
     this.ui.prompt("");
     const bonus = challengeStatus(this);
-    const report = `${text}\n${runSummary(this)}.\nOptional challenge: ${bonus?.text || "Explore"} — ${won && bonus?.done ? "completed!" : "not earned this run."}`;
+    const report = `${won && storyFor(this.item) ? storyFor(this.item).outcome : text}\n${runSummary(this)}.\nOptional challenge: ${bonus?.text || "Explore"} — ${won && bonus?.done ? "completed!" : "not earned this run."}`;
     let outcome;
     let saved = true;
     if (won && this.expedition) {
@@ -799,19 +898,21 @@ export class Game {
         { label: "Back to title", run: () => { this.stop(); this.ui.showTitle(); } },
       ] };
     } else if (won) {
+      if (this.stage.id === "signalbreak") this.progress.checkpoint = null;
       const medals = medalFor(this.time, this.stage.time, bonus.done);
       this.progress = recordResult(this.progress, this.item.chapter, this.stage, Math.max(0, this.time), bonus.done);
       saved = this.save(this.progress) !== false;
       this.ui.setProgress(this.progress);
       const result = this.progress.results[`${this.item.chapter.id}:${this.stage.id}`];
       const next = ALL_STAGES[ALL_STAGES.findIndex(item => item.stage.id === this.stage.id) + 1];
-      outcome = { icon: "✦", eyebrow: "Mission complete", title: this.stage.name, text: report, stats: [["◆".repeat(medals), "this run"], ["◆".repeat(result.medals), "best medals"], [Math.ceil(this.time), "seconds left"], [this.shields, "shield"]], actions: [
+      outcome = { icon: "✦", eyebrow: "Mission complete", title: this.stage.name, text: report, stats: [["◆".repeat(medals), "this run"], ["◆".repeat(result.medals), "best medals"], [Math.ceil(this.storyMode ? this.elapsed : this.time), this.storyMode ? "seconds played" : "seconds left"], [this.shields, "shield"]], actions: [
         ...(next ? [{ label: "Next mission", run: () => { this.stop(); this.ui.showBriefing(next); } }] : []),
         { label: "Mission map", run: () => { this.stop(); this.ui.showMap(); } },
         { label: "Replay", run: () => this.begin(this.item) },
       ] };
     } else {
       this.ui.modal({ icon: "↻", eyebrow: "Mission incomplete", title: "The beach needs another try", text, stats: [[this.progressText(), "progress"], [this.shields, "shield"]], actions: [
+        ...(this.stage.id === "signalbreak" && availableCheckpoint(this.progress) ? [{ label: "Retry from checkpoint", run: () => this.begin(this.item, { resumeCheckpoint: true }) }] : []),
         { label: "Try again", run: () => this.begin(this.item) },
         this.returnAction(),
       ] });
@@ -825,7 +926,7 @@ export class Game {
       this.victoryElapsed = 0;
       this.world.startCelebration(this.progress.equipment);
       const pending = outcome;
-      this.ui.showCelebration(this.stage.name, () => { if (this.pendingResult === pending) this.completeVictory(); }, saved);
+      this.ui.showCelebration(this.stage.name, () => { if (this.pendingResult === pending) this.completeVictory(); }, saved, storyFor(this.item)?.outcome);
     } else this.ui.modal(outcome);
   }
 

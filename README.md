@@ -1,6 +1,6 @@
 # Robot Beach 3D: Signalbreak
 
-A standalone Blender + Three.js successor to Robot Beach Adventures. Explore a stylized coastal island as KAI, recover five Aurora fragments, rescue beach friends, build defenses, race the skyway and relight the lighthouse.
+A standalone Blender + Three.js successor to Robot Beach Adventures. Play KAI, a maintenance robot reconnecting five coastal districts after the Warden's obsolete storm protocol locks the community apart. Rescue friends, restore communications and repair the rule behind the blackout.
 
 [Play Signalbreak](https://buicongnguyen.github.io/hello_algo_claude_3D/) · [Design reassessment and production roadmap](./DESIGN_REVIEW.md)
 
@@ -8,7 +8,11 @@ This is a playable browser-game foundation, with a documented roadmap toward a m
 
 ## Features
 
-- Five story chapters and fifteen missions.
+- Five authored district palettes and fifteen story missions: Breakwater Marina, Tidal Gardens, Salvage Commons, Windward Causeway and LUMA Watch.
+- Spatial relay puzzles with visible power propagation, two-shelter rescue choices and authored causeway routes.
+- Story mode removes campaign deadlines; Challenge mode keeps timed missions. Shields, core damage and boss rules matter in both modes.
+- Character-attributed radio with manual Next / Skip, actionable briefings, chapter consequences and a spoiler-safe story journal.
+- A saved Warden checkpoint preserves core integrity and damage history. The finale requires a nearby, free protocol repair before the festival launch.
 - **Reef Expeditions:** Coral Cove Rescue, Neon Scrap Safari and Moonpool Parade—three open stages with rescue, software salvage and snail escort objectives.
 - **Robot Workshop:** six paint schemes, three software programs and three Blender-modeled attachments. Discoveries persist through retries and browser reloads.
 - Octopus ink helpers, starfish friends, NORI the escort snail and clam shield-repair stations.
@@ -42,6 +46,10 @@ This is a playable browser-game foundation, with a documented roadmap toward a m
 
 Walk over glowing items to pick them up. Touch players have a movement stick and labeled Fire, Pulse, Dash, Use, Freeze and Call buttons. Start with **Beach Brawl · Play now** for immediate fighting, or **Begin journey** for the story campaign.
 
+In relay stages, `Q` / Pulse or `E` / Use rotates the nearest relay clockwise. Follow the cyan beam to the receiver; gray outputs are unpowered. You can set downstream relays first. On rescue stages with two green shelters, either accepts a carried friend. The final Warden repair uses `E` / Use and costs **no scrap**.
+
+Choose Story or Challenge in a campaign briefing. Both retain optional medals; Story's elapsed clock does not expire the mission. Arcade and expeditions keep their own limits. The Warden checkpoint appears on the title screen after the core-defense wave; it only resumes in the mode where it was saved. Retrying keeps the saved core damage and restores a full shield and Bubble Blaster. Finale victory clears that checkpoint.
+
 Choose **Reef Expeditions · New stages** to discover permanent equipment. Walk over CDs and parts to install them immediately, then use **Robot Workshop** between runs to change paint and choose your loadout. Only one software program is active at a time; physical parts occupy body, back and head slots. The clam repairs one missing shield with `E` / Use every 16 seconds. Stay within 6 m of NORI and clear robots within 3.5 m to keep the snail moving.
 
 The minimap is oriented like your movement controls. White arrow = KAI, red circles = enemies, green diamonds = friends, gold diamonds = loot, star = current objective. Discovery ownership and expedition scores are independent of the original campaign; the campaign Reset button preserves them.
@@ -51,6 +59,7 @@ See [EXPEDITIONS_PLAN.md](./EXPEDITIONS_PLAN.md) for the new scenarios, equipmen
 See [VISUAL_CLARITY.md](./VISUAL_CLARITY.md) for compact model proportions, wider mobile framing, detailed Blender models and rendering safeguards.
 See [STAGE_POLISH_PLAN.md](./STAGE_POLISH_PLAN.md) for the game evaluation, detailed implementation plan, logic review and verification of character design, optional challenges and stage endings.
 See [ART_DIRECTION.md](./ART_DIRECTION.md) for the crafted-model art pass, realistic-material goals, review fixes and browser asset budgets.
+See [STORY_PRODUCTION_PLAN.md](./STORY_PRODUCTION_PLAN.md) for the story bible, fifteen-stage redesign, implemented scope, logic review and remaining AAA production gates.
 
 ## Development
 
@@ -72,6 +81,7 @@ npm run assets:blender
 npm test
 npm run build
 npm run test:smoke
+npm run test:story
 ```
 
 See [PROJECT_PLAN.md](./PROJECT_PLAN.md) for the design evaluation, campaign structure, Blender pipeline, architecture, testing strategy and definition of done.

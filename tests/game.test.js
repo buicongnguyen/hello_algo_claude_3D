@@ -4,14 +4,15 @@ import * as THREE from "three";
 import { Game } from "../src/game.js";
 import { World } from "../src/world.js";
 import { ALL_STAGES, BRAWL, findStage } from "../src/missions.js";
-import { createProgress, earnedUpgrades, recordResult } from "../src/rules.js";
+import { createProgress, earnedUpgrades, recordResult, availableCheckpoint } from "../src/rules.js";
+import { traceRelays } from "../src/relay.js";
 import { EXPEDITIONS } from "../src/expedition-data.js";
 import { EQUIPMENT, equipItem, normalizeEquipment, equipmentStats } from "../src/equipment.js";
 import { mapMarkers, mapPoint } from "../src/minimap.js";
 import { challengeStatus, fieldChallenge } from "../src/mission-report.js";
 import { VICTORY_DURATION } from "../src/presentation.js";
 
-function harness(progress = createProgress()) {
+function harness(progress = createProgress({ settings: { campaignMode: "challenge" } })) {
   const mission = new THREE.Group();
   const world = {
     mission, cameraYaw: Math.PI / 6,
@@ -31,6 +32,19 @@ function harness(progress = createProgress()) {
 }
 function move(game, target) { game.player.x = target.x; game.player.z = target.z; game.player.object.position.set(target.x, 0.55, target.z); }
 function pulseAt(game, target) { move(game, target); game.pulseCooldown = 0; game.pulse(); }
+function solveRelay(game) {
+  const stage = game.stage;
+  let solution;
+  for (let value = 0; value < 4 ** stage.count; value++) {
+    const turns = stage.positions.map((_, i) => Math.floor(value / 4 ** i) % 4);
+    if (traceRelays(stage.positions, turns, stage.receiver).complete) { solution = turns; break; }
+  }
+  assert.ok(solution, "authored relay must have a solution");
+  // Downstream devices are deliberately configured first: power is spatial, not a sequence code.
+  for (const node of [...game.relayNodes].reverse()) {
+    while (node.turn !== solution[node.id]) pulseAt(game, node);
+  }
+}
 function defeat(game, enemy) {
   if (enemy.boss) {
     enemy.stateTime = 0; game.updateBoss(0, enemy);
@@ -43,6 +57,97 @@ function defeat(game, enemy) {
   while (enemy.active) pulseAt(game, enemy);
 }
 
+test("Story has no campaign deadline but still fails on shield damage; arcade remains timed", () => {
+  const { game, ui } = harness(createProgress());
+  game.begin(findStage("wake")); game.time = .01; game.update(.05);
+  assert.equal(game.running, true);
+  assert.equal(game.time, 0);
+  assert.ok(game.elapsed > 0);
+  for (const cell of game.entities.filter(e => e.kind === "cell")) pulseAt(game, cell);
+  move(game, game.goal); game.interact();
+  assert.equal(ui.outcome.eyebrow, "Mission complete");
+  game.begin(findStage("wake")); game.shields = 0; game.update(.01);
+  assert.equal(ui.outcome.eyebrow, "Mission incomplete");
+  game.begin(BRAWL); game.time = .01; game.update(.05);
+  assert.equal(ui.outcome.eyebrow, "Mission incomplete");
+});
+
+test("relay mistakes remain recoverable and distant actions never rotate a device", () => {
+  const { game } = harness();
+  game.begin(findStage("trail"));
+  game.interact(); assert.equal(game.relayTurns, 0);
+  const downstream = game.relayNodes[2];
+  for (let i = 0; i < 4; i++) pulseAt(game, downstream);
+  assert.equal(game.running, true);
+  assert.equal(game.relayTurns, 4);
+  assert.equal(game.relayState.powered.includes(2), false);
+  solveRelay(game);
+  assert.equal(game.running, false);
+  assert.equal(game.relayState.complete, true);
+  const turns = game.relayTurns;
+  game.interact(); assert.equal(game.relayTurns, turns, "completed puzzle cannot change");
+});
+
+test("both shelters accept rescues once and guidance selects the nearest safe destination", () => {
+  const { game } = harness();
+  game.begin(findStage("split-current"));
+  const friends = game.entities.filter(e => e.kind === "creature");
+  assert.equal(game.shelters.length, 2);
+  for (let index = 0; index < 2; index++) {
+    move(game, friends[index]); game.interact();
+    const shelter = game.shelters[index]; move(game, shelter);
+    assert.equal(game.objectiveTarget().x, shelter.x);
+    game.interact(); game.interact();
+    assert.equal(game.progressCount, index + 1);
+    assert.equal(game.carry, null);
+  }
+  const markers = mapMarkers(game, null);
+  for (const shelter of game.shelters) assert.ok(markers.some(m => m.type === "friend" && m.x === shelter.x && m.z === shelter.z));
+});
+
+test("Warden checkpoint persists core damage and requires a nearby free repair before launch", () => {
+  const progress = createProgress({ completed: ALL_STAGES.slice(0, -1).map(item => `${item.chapter.id}:${item.stage.id}`) });
+  const first = harness(progress);
+  let saved;
+  first.game.save = value => { saved = JSON.parse(JSON.stringify(value)); return true; };
+  first.game.begin(findStage("signalbreak"));
+  first.game.core.health = 3; first.game.metrics.damageTaken = 2;
+  first.game.time = 0; first.game.elapsed = 201;
+  first.game.spawned = first.game.finalWaveCount;
+  first.game.updateFinale(0);
+  assert.equal(first.game.phase, "warden");
+  assert.equal(saved.completed.includes("siege:signalbreak"), false);
+  assert.equal(availableCheckpoint(createProgress(saved)).coreHealth, 3);
+
+  const { game, ui } = harness(createProgress(saved));
+  game.begin(findStage("signalbreak"), { resumeCheckpoint: true });
+  assert.equal(game.phase, "warden");
+  assert.equal(game.core.health, 3);
+  assert.equal(game.metrics.damageTaken, 2);
+  assert.equal(game.elapsed, 201);
+  assert.equal(game.time, 0);
+  assert.equal(game.shields, game.upgrades.maxShields);
+  assert.equal(game.combat.weapon, "bubble");
+  assert.equal(game.combat.ammo, 36);
+  move(game, game.rocketGoal); game.interact();
+  assert.equal(game.running, true, "rocket is locked until the Warden is repaired");
+  const escort = game.spawnEnemy(false, 2);
+  defeat(game, game.boss); game.updateFinale(0);
+  assert.equal(game.phase, "warden", "living escorts block the repair step");
+  defeat(game, escort); game.updateFinale(0);
+  assert.equal(game.phase, "repair");
+  game.combat.scrap = 0;
+  move(game, game.rocketGoal); game.interact();
+  assert.equal(game.phase, "repair", "repair cannot be installed remotely");
+  assert.match(game.objectiveTarget().label, /free repair/);
+  move(game, game.wardenRepair); game.interact();
+  assert.equal(game.phase, "launch");
+  assert.equal(game.combat.scrap, 0);
+  move(game, game.rocketGoal); game.interact();
+  assert.equal(ui.outcome.eyebrow, "Mission complete");
+  assert.equal(game.progress.checkpoint, null);
+});
+
 test("all fifteen mission objectives can reach completion through their actions", () => {
   const { game, ui, world } = harness();
   for (const item of ALL_STAGES) {
@@ -53,6 +158,8 @@ test("all fifteen mission objectives can reach completion through their actions"
       if (game.goal) { move(game, game.goal); game.interact(); }
     } else if (type === "sequence") {
       for (const node of game.entities.filter(e => e.kind === "node")) pulseAt(game, node);
+    } else if (type === "relay") {
+      solveRelay(game);
     } else if (type === "combat") {
       for (const enemy of game.entities.filter(e => e.kind === "enemy")) defeat(game, enemy);
       move(game, game.goal); game.interact();
@@ -94,6 +201,8 @@ test("all fifteen mission objectives can reach completion through their actions"
       assert.equal(game.phase, "warden");
       defeat(game, game.boss);
       game.updateFinale(0);
+      assert.equal(game.phase, "repair");
+      move(game, game.wardenRepair); game.interact();
       assert.equal(game.phase, "launch");
       move(game, game.rocketGoal); game.interact();
       assert.equal(game.phase, "complete");

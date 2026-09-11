@@ -23,13 +23,15 @@
         <div class="title-card glass">
           <p class="eyebrow">A Robot Beach story</p>
           <h1 id="gameTitle"><span>Signal</span>break</h1>
-          <p class="tagline">New shores. More friends. Build your own colorful little hero.</p>
+          <p class="tagline">Five districts went silent. One little robot refuses to leave anyone behind.</p>
           <div class="button-stack">
-            <button id="expeditionsButton" class="primary">Reef Expeditions · New stages</button>
+            <button id="continueButton" class="primary">Begin journey</button>
+            <button id="resumeCheckpoint" class="hidden">Resume Warden checkpoint</button>
+            <button id="expeditionsButton">Reef Expeditions · New stages</button>
             <button id="brawlButton">Beach Brawl · Play now</button>
             <button id="workshopButton">Robot Workshop</button>
-            <button id="continueButton">Begin journey</button>
             <button id="missionsButton">Mission map</button>
+            <button id="journalButton">Story journal</button>
             <button id="howButton" class="quiet">How to play</button>
             <button id="roamButton" class="hidden">Explore restored island</button>
           </div>
@@ -61,14 +63,21 @@
 
       <section id="briefing" class="screen briefing-screen hidden" aria-labelledby="briefTitle">
         <div class="brief-card glass">
+          <div class="brief-content">
           <div id="briefIcon" class="brief-icon">⚡</div>
           <p id="briefChapter" class="eyebrow"></p>
+          <p id="briefLocation" class="brief-location"></p>
           <h2 id="briefTitle"></h2>
           <p id="briefStory" class="story-line"></p>
+          <p id="briefStakes" class="brief-stakes"></p>
+          <ol id="briefBeats" class="brief-beats"></ol>
           <div class="objective-box"><span>Objective</span><strong id="briefObjective"></strong></div>
           <p id="briefChallenge" class="brief-challenge"></p>
+          <label id="campaignModeControl" class="campaign-mode">Campaign mode <select id="campaignModeSelect"><option value="story">Story · no mission deadline</option><option value="challenge">Challenge · timed missions</option></select></label>
+          <p id="briefPace" class="brief-pace"></p>
           <div id="briefReward" class="reward-line"></div>
-          <div class="button-row">
+          </div>
+          <div class="button-row brief-actions">
             <button id="launchButton" class="primary">Enter mission</button>
             <button id="briefBack">Back</button>
           </div>
@@ -78,7 +87,7 @@
       <section id="hud" class="hud hidden" aria-label="Mission information">
         <div class="mission-card glass"><p id="hudChapter" class="eyebrow"></p><strong id="hudTitle"></strong><span id="hudObjective"></span></div>
         <div class="progress-card glass"><span id="hudProgressIcon">⚡</span><strong id="hudProgress">0 / 3</strong></div>
-        <div class="status-card glass"><span id="hudShield">◆◆</span><div><small>TIME</small><strong id="hudTime">60</strong></div><button id="pauseButton" class="icon-button" aria-label="Pause">Ⅱ</button></div>
+        <div class="status-card glass"><span id="hudShield">◆◆</span><div><small id="hudTimeLabel">TIME</small><strong id="hudTime">60</strong></div><button id="pauseButton" class="icon-button" aria-label="Pause">Ⅱ</button></div>
         <div id="prompt" class="world-prompt hidden">E · INTERACT</div>
         <div id="message" class="message hidden" role="status"></div>
         <div id="combatPanel" class="combat-panel glass hidden"><strong id="weaponName"></strong><span id="weaponAmmo"></span><span id="gadgetCount"></span><small id="teamCount"></small><small>E / Use · repair a downed bot for 2 scrap</small></div>
@@ -90,7 +99,7 @@
       </section>
 
       <section id="dialogue" class="dialogue glass hidden" aria-live="polite">
-        <div id="speakerPortrait" class="portrait">🤖</div><div><strong id="speakerName">LUMA</strong><p id="dialogueText"></p></div><button id="skipDialogue" class="quiet small">Skip</button>
+        <div id="speakerPortrait" class="portrait">🤖</div><div><strong id="speakerName">LUMA</strong><p id="dialogueText"></p></div><div class="radio-controls"><button id="nextDialogue" class="small">Next</button><button id="skipDialogue" class="quiet small">Skip</button></div>
       </section>
 
       <section id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
@@ -103,7 +112,7 @@
           <p id="celebrationSave" class="eyebrow">Stage clear · progress saved</p>
           <h2 id="celebrationTitle">Congratulations!</h2>
           <p id="celebrationStage"></p>
-          <p class="departure-copy">One more island signal restored. Let's take the good news skyward.</p>
+          <p id="departureStory" class="departure-copy">AURORA carries the repair patch to the next district.</p>
           <button id="skipCelebration" class="primary">View results · Skip launch</button>
         </div>
       </section>

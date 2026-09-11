@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { dressRobot } from "./equipment.js";
 import { createSurfaces, finishMaterial, coastalEnvironment, grassGeometry, groundCoverTexture } from "./surfaces.js";
+import { buildDistrict } from "./districts.js";
 import { actorScale, cameraZoom, CAMERA_YAW, departureHeight, limbPhase, VICTORY_DURATION } from "./presentation.js";
 
 const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm", "octopus", "starfish", "snail", "clam", "coral_cluster", "reef_arch", "salvage_tower", "moon_mushroom", "software_disc", "prism_armor", "twin_thrusters", "halo_antenna", "starship"];
@@ -236,6 +237,7 @@ export class World {
     this.sun.color.setHex(palette[3]); this.sun.intensity = theme === "moonpool" ? 1.6 : 2.2;
     this.scene.environmentIntensity = theme === "moonpool" ? .16 : .3;
     if (this.landmarks) this.landmarks.visible = !theme;
+    if (this.landmarks) for (const child of this.landmarks.children) child.visible = true;
     this.boardwalk.visible = this.planks.visible = !theme;
     this.obstacles = theme ? [] : [...(this.defaultObstacles || [])];
     this.mapLandmarks = [...this.obstacles];
@@ -261,6 +263,8 @@ export class World {
     dressRobot(this, this.previewActor, equipment);
     this.previewActor.rotation.y = this.previewAngle ?? 0.4;
   }
+
+  setDistrict(item) { buildDistrict(this, item); }
 
   startCelebration(equipment) {
     this.clearCelebration();
@@ -383,7 +387,17 @@ export class World {
     return group;
   }
 
-  createRoute(points, color = 0x65e5ff) {
+  createRoute(points, color = 0x65e5ff, { beam = false } = {}) {
+    if (beam) {
+      const group = new THREE.Group();
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1], b = points[i];
+        const strip = new THREE.Mesh(new THREE.BoxGeometry(.13, .035, Math.hypot(b.x - a.x, b.z - a.z)), new THREE.MeshBasicMaterial({ color }));
+        strip.position.set((a.x + b.x) / 2, .78, (a.z + b.z) / 2);
+        strip.rotation.y = Math.atan2(b.x - a.x, b.z - a.z); group.add(strip);
+      }
+      this.mission.add(group); return group;
+    }
     const geometry = new THREE.BufferGeometry().setFromPoints(points.map(point => new THREE.Vector3(point.x, 0.72, point.z)));
     const line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color, dashSize: 0.45, gapSize: 0.28, transparent: true, opacity: 0.68 }));
     line.computeLineDistances();

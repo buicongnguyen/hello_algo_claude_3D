@@ -44,6 +44,7 @@ ui = new UI(progress, {
     saveProgress(progress);
   },
   continue: () => ui.showBriefing(nextIncomplete(progress)),
+  resumeCheckpoint: () => { sound.unlock(); game.begin(ALL_STAGES.at(-1), { resumeCheckpoint: true }); },
   brawl: () => ui.showBriefing(BRAWL),
   launch: item => { sound.unlock(); game.begin(item); },
   sound: kind => sound.play(kind),

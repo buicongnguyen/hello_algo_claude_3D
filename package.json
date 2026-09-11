@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
     "test:smoke": "node tests/smoke.mjs",
+    "test:story": "node tests/story-smoke.mjs",
     "test:visual": "node tests/capture.mjs",
     "assets:blender": "node tools/blender/export.mjs"
   },

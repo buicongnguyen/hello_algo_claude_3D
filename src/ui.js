@@ -1,9 +1,10 @@
-import { CHAPTERS, TOTAL_STAGES } from "./missions.js";
-import { earnedUpgrades, isUnlocked, stageKey } from "./rules.js";
+import { CHAPTERS, TOTAL_STAGES, ALL_STAGES } from "./missions.js";
+import { earnedUpgrades, isUnlocked, stageKey, availableCheckpoint } from "./rules.js";
 import { EXPEDITIONS } from "./expedition-data.js";
 import { EQUIPMENT, PAINTS } from "./equipment.js";
 import { Minimap } from "./minimap.js";
 import { fieldChallenge } from "./mission-report.js";
+import { DISTRICTS, storyFor, journalEntries } from "./story.js";
 
 export class UI {
   constructor(progress, callbacks) {
@@ -22,6 +23,13 @@ export class UI {
   }
 
   bind() {
+    document.querySelector("#journalButton").addEventListener("click", () => this.showJournal());
+    document.querySelector("#resumeCheckpoint").addEventListener("click", () => this.callbacks.resumeCheckpoint());
+    document.querySelector("#campaignModeSelect").addEventListener("change", event => {
+      this.callbacks.settings({ campaignMode: event.target.value });
+      this.showBriefing(this.selected);
+    });
+    document.querySelector("#nextDialogue").addEventListener("click", () => this.advanceDialogue());
     document.querySelector("#expeditionsButton").addEventListener("click", () => this.showExpeditions());
     document.querySelector("#workshopButton").addEventListener("click", () => this.showWorkshop());
     document.querySelector("#expeditionWorkshop").addEventListener("click", () => this.showWorkshop());
@@ -112,11 +120,20 @@ export class UI {
   }
 
   updateCampaign() {
-    const complete = this.progress.completed.length;
+    const complete = ALL_STAGES.filter(item => this.progress.completed.includes(stageKey(item.chapter.id, item.stage.id))).length;
     document.querySelector("#campaignCount").textContent = `${complete} / ${TOTAL_STAGES}`;
     document.querySelector("#campaignBar").style.width = `${(complete / TOTAL_STAGES) * 100}%`;
     document.querySelector("#continueButton").textContent = complete ? "Continue journey" : "Begin journey";
     document.querySelector("#roamButton").classList.toggle("hidden", !earnedUpgrades(this.progress).freeRoam);
+    document.querySelector("#resumeCheckpoint").classList.toggle("hidden", !availableCheckpoint(this.progress));
+  }
+
+  showJournal() {
+    const entries = journalEntries(this.progress, ALL_STAGES);
+    this.modal({ icon: "◈", eyebrow: "Recovered memories", title: "The island remembers", text: entries.length
+      ? entries.map(entry => `${entry.district} — ${entry.title}\n${entry.text}`).join("\n\n")
+      : "The first page is waiting. Wake BOLT at Breakwater Marina to recover the island's first memory. Only completed missions appear here; future discoveries stay secret.",
+      actions: [{ label: "Back to title", run: () => this.showTitle() }] });
   }
 
   showMap() {
@@ -127,7 +144,7 @@ export class UI {
       card.className = "chapter-card glass";
       card.style.setProperty("--chapter-color", chapter.color);
       const complete = chapter.stages.filter(stage => this.progress.completed.includes(stageKey(chapter.id, stage.id))).length;
-      card.innerHTML = `<div class="chapter-number">${chapter.number}</div><div class="chapter-copy"><span>${chapter.icon}</span><p class="eyebrow">Chapter ${chapter.number} · ${complete}/3</p><h3>${chapter.name}</h3><p>${chapter.summary}</p><small>Reward · ${chapter.reward}</small></div><div class="stage-dots"></div>`;
+      card.innerHTML = `<div class="chapter-number">${chapter.number}</div><div class="chapter-copy"><span>${chapter.icon}</span><p class="eyebrow">${DISTRICTS[chapter.id].name} · ${complete}/3</p><h3>${chapter.name}</h3><p>${complete === 3 ? DISTRICTS[chapter.id].restored : chapter.summary}</p><small>Reward · ${chapter.reward}</small></div><div class="stage-dots"></div>`;
       const dots = card.querySelector(".stage-dots");
       chapter.stages.forEach((stage, stageIndex) => {
         const button = document.createElement("button");
@@ -149,6 +166,16 @@ export class UI {
     document.querySelector("#briefIcon").textContent = item.chapter.icon;
     document.querySelector("#briefChapter").textContent = item.stage.type === "expedition" ? `Expedition ${item.stageIndex + 1} · ${item.stage.difficulty}` : item.stage.type === "brawl" ? "Arcade · 3 waves · available now" : `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`;
     document.querySelector("#briefTitle").textContent = item.stage.name;
+    const narrative = storyFor(item);
+    document.querySelector("#briefLocation").textContent = narrative ? DISTRICTS[item.chapter.id].name : "Beyond the story route";
+    document.querySelector("#briefStakes").textContent = narrative?.stakes || "Explore, experiment, and bring your discoveries home.";
+    document.querySelector("#briefBeats").replaceChildren(...(narrative?.beats || []).map(text => { const li = document.createElement("li"); li.textContent = text; return li; }));
+    document.querySelector("#campaignModeControl").classList.toggle("hidden", !narrative);
+    document.querySelector("#campaignModeSelect").value = this.progress.settings.campaignMode;
+    document.querySelector("#briefPace").textContent = narrative ? this.progress.settings.campaignMode === "story"
+      ? `No campaign deadline. Shield and core damage still matter. Par time: ${Math.floor(item.stage.time * .75)} active seconds for the speed medal.`
+      : `Timed mission: ${item.stage.time} seconds. Defense preparation pauses the clock. Optional medals never block the next stage.`
+      : `Arcade / expedition limit: ${item.stage.time} seconds. Campaign mode does not change this activity.`;
     document.querySelector("#briefStory").textContent = item.stage.story;
     document.querySelector("#briefObjective").textContent = item.stage.objective;
     document.querySelector("#briefChallenge").textContent = `Optional challenge · ${fieldChallenge(item.stage)?.text || "Explore at your own pace"}. ${["brawl", "expedition"].includes(item.stage.type) ? "+500 score on victory." : "Earn the third medal."}`;
@@ -161,14 +188,15 @@ export class UI {
     this.screens.forEach(screen => document.querySelector(`#${screen}`).classList.add("hidden"));
     this.hud.classList.remove("hidden");
     this.touch.classList.toggle("hidden", !matchMedia("(pointer: coarse)").matches);
-    this.write("hudChapter", item.stage.type === "expedition" ? `Expedition ${item.stageIndex + 1} · ${item.stage.theme}` : item.stage.type === "brawl" ? "Beach Brawl · survive the party" : `Chapter ${item.chapter.number} · Mission ${item.stageIndex + 1}`);
+    this.write("hudChapter", item.stage.type === "expedition" ? `Expedition ${item.stageIndex + 1} · ${item.stage.theme}` : item.stage.type === "brawl" ? "Beach Brawl · survive the party" : `Chapter ${item.chapter.number} · ${DISTRICTS[item.chapter.id]?.name || "Restored island"}`);
     this.write("hudTitle", item.stage.name);
     this.write("hudObjective", item.stage.objective);
     this.write("fieldChallenge", "");
   }
 
   updateHUD(state) {
-    this.write("hudTime", state.untimed ? "—" : Math.max(0, Math.ceil(state.time)));
+    this.write("hudTimeLabel", state.storyMode ? "PLAY TIME" : "TIME LEFT");
+    this.write("hudTime", state.untimed ? "—" : state.storyMode ? `${Math.floor(state.elapsed / 60)}:${String(Math.floor(state.elapsed % 60)).padStart(2, "0")}` : Math.max(0, Math.ceil(state.time)));
     this.write("hudProgress", state.progressText);
     this.write("hudProgressIcon", state.progressIcon || "⚡");
     document.querySelector("#fieldChallenge").classList.toggle("hidden", !state.challenge);
@@ -238,37 +266,40 @@ export class UI {
   dialogue(lines, onDone) {
     clearTimeout(this.dialogueTimer);
     if (!lines?.length) return onDone?.();
-    const panel = document.querySelector("#dialogue");
-    let index = 0;
-    panel.classList.remove("hidden");
-    const next = () => {
-      document.querySelector("#speakerName").textContent = index === 0 ? "LUMA" : "BOLT";
-      document.querySelector("#speakerPortrait").textContent = index === 0 ? "🔆" : "🐕";
-      document.querySelector("#dialogueText").textContent = lines[index];
-      index += 1;
-      if (index >= lines.length) {
-        clearTimeout(this.dialogueTimer);
-        this.dialogueTimer = setTimeout(() => { this.hideDialogue(); onDone?.(); }, 2600);
-      } else {
-        clearTimeout(this.dialogueTimer);
-        this.dialogueTimer = setTimeout(next, 2600);
-      }
-    };
-    next();
+    this.dialogueLines = lines.map(entry => typeof entry === "string" ? { speaker: "LUMA", text: entry } : entry);
+    this.dialogueIndex = 0; this.dialogueDone = onDone;
+    document.querySelector("#dialogue").classList.remove("hidden");
+    this.renderDialogue();
+  }
+
+  renderDialogue() {
+    const line = this.dialogueLines?.[this.dialogueIndex];
+    if (!line) return this.hideDialogue();
+    document.querySelector("#speakerName").textContent = line.speaker;
+    document.querySelector("#speakerPortrait").textContent = { LUMA: "🔆", BOLT: "🐕", KAI: "🤖", AURORA: "✦", WARDEN: "◈" }[line.speaker] || "◈";
+    document.querySelector("#dialogueText").textContent = line.text;
+    document.querySelector("#nextDialogue").textContent = this.dialogueIndex + 1 === this.dialogueLines.length ? "Done" : `Next · ${this.dialogueIndex + 1}/${this.dialogueLines.length}`;
+  }
+
+  advanceDialogue() {
+    this.dialogueIndex++; this.renderDialogue();
   }
 
   hideDialogue() {
     clearTimeout(this.dialogueTimer);
     document.querySelector("#dialogue").classList.add("hidden");
+    this.dialogueLines = null;
+    const done = this.dialogueDone; this.dialogueDone = null; done?.();
   }
 
-  showCelebration(stageName, onSkip, saved = true) {
+  showCelebration(stageName, onSkip, saved = true, story = null) {
     this.hideDialogue();
     clearTimeout(this.messageTimer);
     this.hud.classList.add("hidden");
     this.touch.classList.add("hidden");
     document.querySelector("#modal").classList.add("hidden");
     document.querySelector("#celebrationStage").textContent = stageName;
+    document.querySelector("#departureStory").textContent = story || "AURORA carries the repair patch to the next district. Every little friend, one bright island.";
     document.querySelector("#celebrationSave").textContent = saved ? "Stage clear · progress saved" : "Stage clear · progress kept this session";
     const button = document.querySelector("#skipCelebration");
     button.onclick = onSkip;
