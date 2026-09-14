@@ -213,7 +213,7 @@ export class UI {
     this.touch.classList.toggle("combat-active", active);
     if (active) {
       this.write("weaponName", combat.weapon === "arc" ? "Arc Fork" : combat.weapon ? "Bubble Blaster" : "Find a weapon crate");
-      this.write("weaponAmmo", combat.weapon ? `${combat.ammo} shots · hold Fire / Space` : "Walk over a glowing crate");
+      this.write("weaponAmmo", combat.weapon ? `${combat.ammo} shots · ${matchMedia("(pointer: coarse)").matches ? "hold Fire" : "hold J / mouse"}` : "Walk over a glowing crate");
       this.write("gadgetCount", `F Freeze ${combat.freezeCharges} · R Crabs ${combat.whistles}`);
       this.write("teamCount", `${combat.scrap} scrap · ${combat.game.entities.filter(e => e.kind === "ally").length}/3 robot pals`);
       this.write("touchFreeze", `Freeze ${combat.freezeCharges}`);

@@ -89,7 +89,7 @@ export class Combat {
       this.ammo = WEAPONS[item.type].ammo;
       this.cooldown = 0;
       this.equipVisual();
-      this.game.ui.message(`${WEAPONS[item.type].name}! Hold Fire / Space to auto-aim.`);
+      this.game.ui.message(`${WEAPONS[item.type].name}! Hold Fire, J or left mouse to auto-aim.`);
     } else if (item.type === "freeze") { this.freezeCharges++; this.game.ui.message("Freeze Pop! F / Freeze stops a nearby group."); }
     else if (item.type === "whistle") { this.whistles++; this.game.ui.message("Crab Whistle! R / Call brings three tiny helpers."); }
     else { this.game.shields = Math.min(this.game.upgrades.maxShields, this.game.shields + 1); this.game.ui.message("Shield patched. Back in the brawl!"); }

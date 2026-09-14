@@ -28,7 +28,7 @@ export class InputController {
         if (event.code === "KeyQ") this.actions.add("pulse");
         if (event.code === "KeyF") this.actions.add("freeze");
         if (event.code === "KeyR") this.actions.add("call");
-        if (["ShiftLeft", "ShiftRight"].includes(event.code)) this.actions.add("dash");
+        if (["Space", "ShiftLeft", "ShiftRight"].includes(event.code)) this.actions.add("dash");
         if (["KeyE", "Enter"].includes(event.code)) this.actions.add("interact");
         if (event.code === "Escape") this.actions.add("pause");
       }
@@ -91,7 +91,7 @@ export class InputController {
     return true;
   }
 
-  held(action) { return this.enabled && action === "shoot" && (this.keys.has("Space") || this.keys.has("KeyJ") || this.firePointers.size > 0); }
+  held(action) { return this.enabled && action === "shoot" && (this.keys.has("KeyJ") || this.firePointers.size > 0); }
 
   clear() {
     this.actions.clear();

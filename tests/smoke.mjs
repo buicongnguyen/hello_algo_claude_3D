@@ -43,6 +43,12 @@ try {
   await page.getByRole("button", { name: "Enter mission" }).click();
   await page.waitForTimeout(350);
   if (!await page.locator("#hud").isVisible()) throw new Error("Mission HUD is not visible");
+  // Focused radio buttons keep native Space activation; no simultaneous dash or shot.
+  await page.locator("#nextDialogue").focus();
+  await page.keyboard.press("Space");
+  if (await page.locator("#speakerName").textContent() !== "BOLT") throw new Error("Space did not activate the focused radio button");
+  if (await page.evaluate(() => window.__ROBOT_BEACH__.game.dashCooldown) !== 0) throw new Error("Radio Space also triggered a dash");
+  await page.locator("#skipDialogue").click();
   const before = await page.evaluate(() => ({ x: window.__ROBOT_BEACH__.game.player.x, z: window.__ROBOT_BEACH__.game.player.z }));
   await page.keyboard.down("KeyW");
   // Wait for simulation progress, not a fixed wall-clock sleep during software-GPU compilation.
@@ -152,8 +158,12 @@ try {
     const enemy = game.spawnEnemy(false, 1); enemy.x = game.player.x + 4; enemy.z = game.player.z;
   });
   await page.keyboard.down("Space");
-  await page.waitForTimeout(400);
+  await page.waitForFunction(() => window.__ROBOT_BEACH__.game.dashCooldown > 0);
   await page.keyboard.up("Space");
+  if (await page.evaluate(() => window.__ROBOT_BEACH__.game.combat.ammo) !== 36) throw new Error("Space dash consumed ammunition");
+  await page.keyboard.down("KeyJ");
+  await page.waitForFunction(() => window.__ROBOT_BEACH__.game.combat.ammo < 36);
+  await page.keyboard.up("KeyJ");
   if (await page.evaluate(() => window.__ROBOT_BEACH__.game.combat.ammo) >= 36) throw new Error("Held Fire did not shoot the equipped weapon");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => window.__ROBOT_BEACH__.game.paused);

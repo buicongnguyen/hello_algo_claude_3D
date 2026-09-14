@@ -37,13 +37,15 @@ This is a playable browser-game foundation, with a documented roadmap toward a m
 ## Controls
 
 - `WASD` or arrows — move
-- Hold Space, `J`, or the left mouse button on the island — fire your equipped weapon (auto-aim)
+- Hold `J` or the left mouse button on the game canvas — fire your equipped weapon (auto-aim)
 - `Q` — unlimited close-range pulse, including when ammunition is empty
 - `F` — use a Freeze Pop
 - `R` — summon the crab crew with a Crab Whistle
-- `Shift` — dash
+- `Space` or `Shift` — dash / boost (press once; respects the dash cooldown)
 - `E` or Enter — interact / repair a nearby downed robot for 2 scrap (maximum 3 robot teammates)
 - `Escape` — pause
+
+Space is deliberately a movement action, not another Use key or a fire button. Dash/boost works in every stage, including underwater and flight; jumping is not implemented because navigation and objectives currently use a fixed-height play plane. E remains the contextual action for scanning, carrying, relay rotation and repairs. While a visible menu or radio button has focus, Space / Enter activate that button without also triggering gameplay.
 
 Walk over glowing items to pick them up. Touch players have a movement stick and labeled Fire, Pulse, Dash, Use, Freeze and Call buttons. Start with **Beach Brawl · Play now** for immediate fighting, or **Begin journey** for the story campaign.
 
