@@ -17,6 +17,7 @@ export function mapMarkers(game, target) {
   for (const p of game.combat?.pickups || []) if (p.active) markers.push({ ...p, type: "loot" });
   for (const shelter of game.shelters || []) markers.push({ ...shelter, type: "friend" });
   for (const p of game.expedition?.discoveries || []) if (p.active) markers.push({ ...p, type: "loot" });
+  for (const p of game.discovery?.exhibits || []) if (p.active) markers.push({ ...p, type: "loot" });
   for (const p of game.expedition?.friends || []) if (p.active && !p.carried) markers.push({ ...p, type: "friend" });
   if (game.expedition) {
     for (const p of [game.expedition.snail, game.expedition.clam, game.expedition.helper, game.expedition.sanctuary].filter(Boolean)) markers.push({ ...p, type: "friend" });

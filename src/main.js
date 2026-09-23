@@ -8,6 +8,8 @@ import { ALL_STAGES, BRAWL } from "./missions.js";
 import { Sound } from "./sound.js";
 import { EXPEDITIONS } from "./expedition-data.js";
 import { equipItem, EQUIPMENT, PAINTS } from "./equipment.js";
+import { ambienceFor } from "./sound.js";
+import { ENVIRONMENTS } from "./journey-data.js";
 
 const STORAGE_KEY = "robot-beach-3d-signalbreak-v1";
 
@@ -31,7 +33,7 @@ let game;
 let ui;
 
 ui = new UI(progress, {
-  titleScene: () => { if (!game?.running && world.models.size) { world.clearMission(); world.setDistrict(ALL_STAGES[0]); } },
+  titleScene: () => { sound.ambience("menu"); if (!game?.running && world.models.size) { world.clearMission(); world.setDistrict(ALL_STAGES[0]); } },
   preview: enabled => {
     if (enabled) world.showRobotPreview(progress.equipment);
     else if (world.previewActor) world.clearMission();
@@ -49,11 +51,13 @@ ui = new UI(progress, {
   brawl: () => ui.showBriefing(BRAWL),
   launch: item => { sound.unlock(); game.begin(item); },
   sound: kind => sound.play(kind),
+  ambience: stage => sound.ambience(stage ? ambienceFor(stage, ENVIRONMENTS) : "menu"),
   roam: () => {
     if (!earnedUpgrades(progress).freeRoam) return;
     sound.unlock();
     const last = ALL_STAGES.at(-1);
-    game.begin({ ...last, stage: { ...last.stage, name: "Festival Free Roam", type: "roam", time: 0, count: 0, objective: "Explore the restored island with BOLT. Pause to return to your missions.", dialogue: ["No countdown. Just the sea, the light and all our friends."] } });
+    // Free roam takes place on the restored island, so it must not inherit the museum's scene or HUD text.
+    game.begin({ ...last, stage: { ...last.stage, name: "Festival Free Roam", type: "roam", scene: undefined, location: "The restored island", activity: "Explore freely", exhibits: undefined, time: 0, count: 0, objective: "Explore the restored island with BOLT. Pause to return to your missions.", dialogue: ["No countdown. Just the sea, the light and all our friends."] } });
   },
   pause: () => game.pause(),
   reset: () => {
@@ -70,6 +74,9 @@ ui = new UI(progress, {
     world.settings = progress.settings;
     if (patch.quality) world.setQuality(patch.quality);
     sound.enabled = progress.settings.sound !== false;
+    // Turning sound on is a user gesture: start the audio context now instead of waiting for a relaunch.
+    if (patch.sound === true) { sound.unlock(); sound.ambience(game?.running ? ambienceFor(game.stage, ENVIRONMENTS) : "menu"); }
+    if (patch.sound === false) sound.stopAmbience();
     saveProgress(progress);
   },
 });
@@ -107,5 +114,7 @@ document.addEventListener("visibilitychange", () => {
   lastTime = performance.now();
   if (document.hidden && game.running && !game.paused) game.pause();
 });
+// Losing window focus (another window, a system dialog) pauses too, so timers and enemies never run unattended.
+window.addEventListener("blur", () => { if (game.running && !game.paused) game.pause(); });
 
 window.__ROBOT_BEACH__ = { world, game, ui, input, catalog: ALL_STAGES, brawl: BRAWL, expeditions: EXPEDITIONS };

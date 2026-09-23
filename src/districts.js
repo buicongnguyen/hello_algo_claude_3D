@@ -1,20 +1,25 @@
 import * as THREE from "three";
 import { ENVIRONMENTS } from "./journey-data.js";
+import { createEarth } from "./planet.js";
 
 export function buildDistrict(world, item) {
   const environment = ENVIRONMENTS[item.stage.scene];
   if (!environment) return;
   world.journeyEnvironment = environment;
   world.shared.visible = false;
-  world.scene.background.setHex(environment.sky);
-  world.scene.fog.color.setHex(environment.fog); world.scene.fog.density = environment.density;
-  world.sun.color.setHex(environment.kind === "underwater" ? 0x8dc8ff : environment.kind === "moon" ? 0xe7edff : 0xffe4c9);
-  world.sun.intensity = ["underwater", "space"].includes(environment.kind) ? 1.6 : 2.2;
-  world.scene.environmentIntensity = environment.kind === "underwater" ? .15 : .25;
-  world.obstacles = []; world.mapLandmarks = [];
+  world.applyAtmosphere(environment.key);
+  // Blender exports a collision footprint for every solid prop that reaches into the play space.
+  world.obstacles = (world.colliders.get("journey_" + environment.key) || []).map(([x, z, radius]) => ({ x, z, radius }));
+  world.mapLandmarks = world.obstacles.filter(obstacle => obstacle.radius >= .6);
   const root = new THREE.Group(); root.name = "JourneyScene_" + environment.key;
   world.journeyRoot = root; world.scene.add(root);
-  world.createActor("journey_" + environment.key, { x:0, y:0, z:0 }, 1, root, {nativeScale:true});
+  const scenery = world.createActor("journey_" + environment.key, { x:0, y:0, z:0 }, 1, root, {nativeScale:true});
+  scenery.traverse(child => {
+    if (!child.isMesh) return;
+    const name = child.material?.name || "";
+    // Emitters, water and clouds neither cast nor catch hard shadows; soft volumes would show facets.
+    if (/^Journey (Glow|Water|Cloud)/.test(name)) child.castShadow = child.receiveShadow = false;
+  });
   if (["underwater","space","moon"].includes(environment.kind)) {
     const count = environment.kind === "underwater" ? 100 : 200, positions = [];
     for (let i=0;i<count;i++) {
@@ -26,35 +31,15 @@ export function buildDistrict(world, item) {
     root.add(particles); world.journeyParticles = particles;
   }
   if (["space","moon"].includes(environment.kind) && environment.key !== "crater") {
-    const earth = new THREE.Group();
-    if(environment.kind==="space") earth.position.set(-2,-9,-22);
-    else earth.position.set(-20,5,-65);
-    earth.add(new THREE.Mesh(new THREE.SphereGeometry(8,36,24),new THREE.MeshStandardMaterial({color:0x297bc5,roughness:1,emissive:0x073354,emissiveIntensity:.15})));
-    const continents = [
-      [[-165,62],[-130,70],[-65,50],[-82,10],[-110,25],[-125,48]],
-      [[-80,10],[-48,-3],[-35,-20],[-70,-55],[-77,-15]],
-      [[-18,34],[10,38],[48,12],[36,-28],[18,-35],[0,-5]],
-      [[-10,38],[0,62],[45,70],[100,65],[145,45],[118,12],[80,5],[40,34]],
-      [[112,-12],[149,-10],[154,-37],[116,-35]],
-    ];
-    const vertex = ([lon,lat]) => new THREE.Vector3(Math.cos(lat*Math.PI/180)*Math.sin(lon*Math.PI/180),Math.sin(lat*Math.PI/180),Math.cos(lat*Math.PI/180)*Math.cos(lon*Math.PI/180)).multiplyScalar(8.025);
-    const green = new THREE.MeshStandardMaterial({color:0x5bad73,roughness:1,side:THREE.DoubleSide});
-    // Subdivide along the sphere: large flat triangles would sink beneath the ocean mesh.
-    const curvedTriangle=(vertices,a,b,c,depth=3)=>{
-      if(!depth) {vertices.push(...a.toArray(),...b.toArray(),...c.toArray());return;}
-      const ab=a.clone().add(b).normalize().multiplyScalar(8.025),bc=b.clone().add(c).normalize().multiplyScalar(8.025),ca=c.clone().add(a).normalize().multiplyScalar(8.025);
-      curvedTriangle(vertices,a,ab,ca,depth-1);curvedTriangle(vertices,ab,b,bc,depth-1);
-      curvedTriangle(vertices,ca,bc,c,depth-1);curvedTriangle(vertices,ab,bc,ca,depth-1);
-    };
-    for (const shape of continents) {
-      const center = shape.reduce((a,p)=>[a[0]+p[0]/shape.length,a[1]+p[1]/shape.length],[0,0]);
-      const vertices=[];
-      for(let i=0;i<shape.length;i++) curvedTriangle(vertices,vertex(center),vertex(shape[i]),vertex(shape[(i+1)%shape.length]));
-      const geometry=new THREE.BufferGeometry(); geometry.setAttribute("position",new THREE.Float32BufferAttribute(vertices,3));geometry.computeVertexNormals();
-      earth.add(new THREE.Mesh(geometry,green));
-    }
-    earth.rotation.y=.5; root.add(earth); world.journeyPlanet=earth;
+    // In orbit the planet fills the lower horizon; from the Moon it hangs in the black sky.
+    const orbit = environment.kind === "space";
+    const earth = createEarth(world, orbit ? 100 : 9);
+    if (orbit) earth.position.set(-10, -104, -96);
+    else earth.position.set(-24, 12, -78);
+    earth.rotation.set(.35, 2.2, .1);
+    root.add(earth); world.journeyPlanet = earth;
   }
+  if (environment.kind === "underwater") root.add(world.journeyRays = lightShafts(environment.key === "abyss" ? 0x3f6fd8 : 0xbff6ff, environment.key === "abyss" ? .05 : .11));
   world.journeyCompanion = world.createActor("bolt",{x:-3,z:7},.95,world.mission);
   fitTravelRig(world, world.journeyCompanion, environment.travel, true);
 }
@@ -72,4 +57,30 @@ export function fitTravelRig(world, actor, mode, dog = false) {
     const jets=world.createActor("twin_thrusters",{x:0,y:0,z:0},1,actor,{nativeScale:true});
     jets.position.set(0,dog?-.2:0,dog?-.2:0);
   }
+}
+
+// Additive light shafts give underwater scenes depth; they never write depth or cast shadows.
+export function lightShafts(color, opacity) {
+  const group = new THREE.Group();
+  group.name = "Light shafts";
+  const geometry = new THREE.CylinderGeometry(1.2, 3.4, 26, 12, 4, true);
+  const colors = [];
+  const position = geometry.attributes.position;
+  for (let i = 0; i < position.count; i++) {
+    const t = (position.getY(i) + 13) / 26;
+    colors.push(1, 1, 1, Math.sin(Math.min(1, t * 1.25) * Math.PI) * .9);
+  }
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 4));
+  const material = new THREE.MeshBasicMaterial({ color, vertexColors: true, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  for (let i = 0; i < 9; i++) {
+    const shaft = new THREE.Mesh(geometry, material);
+    const angle = i * 2.399, radius = 4 + (i % 4) * 5.5;
+    shaft.position.set(Math.cos(angle) * radius, 12, Math.sin(angle) * radius - 6);
+    shaft.rotation.set(.18 + (i % 3) * .05, 0, .22 - (i % 2) * .1);
+    shaft.scale.setScalar(.8 + (i % 3) * .25);
+    shaft.userData.phase = i * 1.3;
+    shaft.castShadow = shaft.receiveShadow = false;
+    group.add(shaft);
+  }
+  return group;
 }

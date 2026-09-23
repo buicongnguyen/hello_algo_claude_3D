@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { actorHeight } from "./presentation.js";
+import { flashActor } from "./feedback.js";
 
 const aimHeight = entity => actorHeight(entity.object, entity.variant === "drone" ? 0.38 : entity.variant === "dog" ? 1.15 : 1.35);
 
@@ -9,6 +10,8 @@ export const WEAPONS = {
   bubble: { name: "Bubble Blaster", ammo: 36, range: 14, cooldown: 0.24, damage: 1, color: 0x5ce5ff },
   arc: { name: "Arc Fork", ammo: 18, range: 11, cooldown: 0.6, damage: 2, color: 0xc99bff },
 };
+// Rush speed x duration is the distance an attack really travels; its warning line must match it.
+const RUSH = { bot: { speed: 6, time: .3 }, dog: { speed: 12, time: .55 }, drone: { speed: 12, time: .55 } };
 const LOOT = {
   bubble: { label: "BUBBLE BLASTER", color: 0x5ce5ff },
   arc: { label: "ARC FORK", color: 0xc99bff },
@@ -84,6 +87,8 @@ export class Combat {
     if (!item.active) return;
     if (item.type === "freeze" && this.freezeCharges >= 3 || item.type === "whistle" && this.whistles >= 3 || item.type === "shield" && this.game.shields >= this.game.upgrades.maxShields) return;
     item.active = false; item.object.visible = false;
+    this.game.sfx?.("pickup");
+    this.game.world.particles?.emit(item.x, 1, item.z, { count: 14, color: LOOT[item.type].color, speed: 2.4, up: 2.2, life: .6, size: .22, gravity: -2 });
     if (WEAPONS[item.type]) {
       this.weapon = item.type;
       this.ammo = WEAPONS[item.type].ammo;
@@ -118,6 +123,7 @@ export class Combat {
       if (distance(item, this.game.player) < 1.45) this.collect(item);
     }
     for (const enemy of this.game.entities) {
+      if (enemy.flash > 0) { enemy.flash = Math.max(0, enemy.flash - dt); flashActor(enemy.object, enemy.flash / .14); }
       if (enemy.repairTag) enemy.repairTag.visible = enemy.repairable && distance(enemy, this.game.player) < 5;
       if (enemy.frozen > 0) {
         enemy.frozen = Math.max(0, enemy.frozen - dt);
@@ -138,7 +144,9 @@ export class Combat {
     const target = this.nearest(this.game.player, weapon.range, this.enemies().filter(e => !e.boss || e.state === "exposed"));
     if (!target) return false; // Holding Fire never wastes ammunition on empty sky.
     this.cooldown = weapon.cooldown * (this.game.upgrades.fireRate || 1); this.ammo--;
-    this.game.player.object.rotation.y = Math.atan2(target.x - this.game.player.x, target.z - this.game.player.z);
+    // KAI keeps aiming at the target briefly, so strafing while firing reads clearly.
+    this.game.aimYaw = Math.atan2(target.x - this.game.player.x, target.z - this.game.player.z);
+    this.game.aimTime = .35;
     if (this.weapon === "arc") {
       const chain = [target];
       while (chain.length < 3) {
@@ -147,7 +155,7 @@ export class Combat {
         chain.push(next);
       }
       this.makeBolt([this.game.player, ...chain], weapon.color);
-      for (const enemy of chain) this.hit(enemy, weapon.damage);
+      for (const enemy of chain) this.hit(enemy, weapon.damage, this.game.player);
     } else this.makeBullet(target, weapon);
     this.game.ui.callbacks?.sound?.("shot");
     return true;
@@ -187,7 +195,7 @@ export class Combat {
           const t = Math.max(0, Math.min(1, ((enemy.x - oldX) * dx + (enemy.z - oldZ) * dz) / (dx * dx + dz * dz || 1)));
           return { enemy, t, d: Math.hypot(enemy.x - oldX - t * dx, enemy.z - oldZ - t * dz) };
         }).filter(hit => hit.d < (hit.enemy.boss ? 1.3 : 0.85)).sort((a, b) => a.t - b.t)[0];
-        if (hit) { this.hit(hit.enemy, shot.damage); shot.life = 0; }
+        if (hit) { this.hit(hit.enemy, shot.damage, shot); shot.life = 0; }
       }
       if (shot.life <= 0) {
         if (shot.beam) this.game.world.release(shot.object);
@@ -197,13 +205,22 @@ export class Combat {
     }
   }
 
-  hit(enemy, damage) {
+  hit(enemy, damage, source = this.game.player) {
     if (!hostile(enemy)) return false;
     if (enemy.boss && enemy.state !== "exposed") {
-      this.game.ui.message("Boss shield up—dodge the charge, then hit the cyan core.", true);
+      // Only KAI's own attacks explain the shield; helpers must never hide the charge telegraph.
+      if (source === this.game.player) this.game.ui.message("Boss shield up—dodge the charge, then hit the cyan core.", true);
       return false;
     }
     enemy.health -= damage;
+    enemy.flash = .14;
+    if (!enemy.boss && source && Number.isFinite(source.x)) {
+      const away = distance(enemy, source) || 1;
+      enemy.x += (enemy.x - source.x) / away * .32; enemy.z += (enemy.z - source.z) / away * .32;
+      enemy.object.position.x = enemy.x; enemy.object.position.z = enemy.z;
+    }
+    this.game.world.particles?.emit(enemy.x, aimHeight(enemy), enemy.z, { count: 7, color: 0xffd166, speed: 4.5, up: 1, life: .28, size: .16, gravity: -6 });
+    this.game.sfx?.("hit");
     if (enemy.healthBar) enemy.healthBar.scale.x = Math.max(0, enemy.health / enemy.maxHealth) * 1.5;
     this.game.world.pulse(enemy, 0.65, 0xffd166);
     if (enemy.health <= 0) this.game.disableEntity(enemy, ["combat", "defense", "finale", "brawl"].includes(this.game.stage.type));
@@ -232,15 +249,16 @@ export class Combat {
         enemy.attackTime = enemy.variant === "drone" ? 0.85 : enemy.variant === "dog" ? 0.65 : 0.4;
         enemy.rushX = (target.x - enemy.x) / d;
         enemy.rushZ = (target.z - enemy.z) / d;
-        enemy.warningLine = g.world.createRoute([enemy, { x: enemy.x + enemy.rushX * range, z: enemy.z + enemy.rushZ * range }], 0xff5b45);
+        const reach = RUSH[enemy.variant].speed * RUSH[enemy.variant].time;
+        enemy.warningLine = g.world.createRoute([enemy, { x: enemy.x + enemy.rushX * reach, z: enemy.z + enemy.rushZ * reach }], 0xff5b45);
       }
     } else {
       enemy.attackTime -= dt;
       if (enemy.attackState === "windup" && enemy.attackTime <= 0) {
-        enemy.attackState = "rush"; enemy.attackTime = enemy.variant === "bot" ? 0.3 : 0.55;
+        enemy.attackState = "rush"; enemy.attackTime = RUSH[enemy.variant].time;
         if (enemy.warningLine) { g.world.release(enemy.warningLine); enemy.warningLine = null; }
       } else if (enemy.attackState === "rush") {
-        const speed = enemy.variant === "bot" ? 6 : 12;
+        const speed = RUSH[enemy.variant].speed;
         enemy.x += enemy.rushX * speed * dt; enemy.z += enemy.rushZ * speed * dt;
         moving = true;
         if (enemy.attackTime <= 0) { enemy.attackState = "recover"; enemy.attackTime = 0.8; }
@@ -248,12 +266,14 @@ export class Combat {
     }
     const radius = Math.hypot(enemy.x, enemy.z);
     if (radius > 18) { enemy.x *= 18 / radius; enemy.z *= 18 / radius; }
+    g.world.constrainPlayer?.(enemy);
     const height = enemy.variant === "drone" ? (enemy.attackState === "rush" ? 0.95 : 1.85 + Math.sin(g.elapsed * 5 + enemy.x) * 0.2) : 0.55;
     enemy.object.position.set(enemy.x, height, enemy.z);
     enemy.object.rotation.y = attackingPlayer && ["windup", "rush"].includes(enemy.attackState)
       ? Math.atan2(enemy.rushX, enemy.rushZ) : Math.atan2(target.x - enemy.x, target.z - enemy.z);
     g.world.animateActor?.(enemy.object, g.elapsed + enemy.x, moving);
-    enemy.object.traverse(child => { if (child.name.startsWith("Rotor")) child.rotation.y += dt * 28; });
+    if (!enemy.rotors) { enemy.rotors = []; enemy.object.traverse(child => { if (child.name.startsWith("Rotor")) enemy.rotors.push(child); }); }
+    for (const rotor of enemy.rotors) rotor.rotation.y += dt * 28;
     return !attackingPlayer || enemy.attackState === "rush";
   }
 
@@ -280,6 +300,8 @@ export class Combat {
 
   callAnimals() {
     if (!this.enabled || this.whistles <= 0) { this.game.ui.message("Pick up a gold Crab Whistle first.", true); return false; }
+    // A whistle is a limited resource; never spend it (or credit the challenge) with nothing to fight.
+    if (!this.nearest(this.game.player, 14)) { this.game.ui.message("No robots nearby. Save the whistle for a real fight.", true); return false; }
     this.whistles--;
     this.game.metrics.calls++;
     if (!this.animals.length) for (let i = 0; i < 3; i++) {
@@ -337,7 +359,7 @@ export class Combat {
     for (const ally of team) {
       if (ally.animal) { ally.life -= dt; if (ally.life <= 0) { ally.object.visible = false; continue; } }
       ally.cooldown = Math.max(0, ally.cooldown - dt);
-      const target = this.nearest(ally, 11);
+      const target = this.nearest(ally, 11, this.enemies().filter(e => !e.boss || e.state === "exposed"));
       const destination = target || { x: this.game.player.x + (ally.index - 1) * 1.8, z: this.game.player.z + 2 };
       const d = distance(ally, destination) || 1;
       const range = ally.animal ? 1.35 : 6;
@@ -345,13 +367,14 @@ export class Combat {
         const step = Math.min(d, dt * (ally.animal ? 5.2 : 4));
         ally.x += (destination.x - ally.x) / d * step; ally.z += (destination.z - ally.z) / d * step;
       }
+      this.game.world.constrainPlayer?.(ally);
       ally.object.position.set(ally.x, ally.variant === "drone" ? 1.8 : 0.55 + (ally.animal ? Math.abs(Math.sin(this.game.elapsed * 12)) * 0.15 : 0), ally.z);
       ally.object.rotation.y = Math.atan2(destination.x - ally.x, destination.z - ally.z);
       this.game.world.animateActor?.(ally.object, this.game.elapsed, d > range);
       if (target && d < range && ally.cooldown <= 0) {
         ally.cooldown = ally.animal ? 1.2 : 1;
         this.makeBolt([ally, target], ally.animal ? 0xffc75f : 0x65ed9c);
-        this.hit(target, 1);
+        this.hit(target, 1, ally);
       }
     }
   }

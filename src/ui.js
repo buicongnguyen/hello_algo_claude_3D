@@ -6,6 +6,11 @@ import { Minimap } from "./minimap.js";
 import { fieldChallenge } from "./mission-report.js";
 import { DISTRICTS, storyFor, journalEntries } from "./story.js";
 
+// Touch players see the on-screen button names instead of keyboard keys.
+export function touchPrompt(text) {
+  return text.replace(/^E \/ Q · /, "USE / PULSE · ").replace(/^E · /, "USE · ").replace(/^Q · /, "PULSE · ");
+}
+
 export class UI {
   constructor(progress, callbacks) {
     this.progress = progress;
@@ -42,7 +47,12 @@ export class UI {
     document.querySelectorAll("[data-screen='title']").forEach(button => button.addEventListener("click", () => this.showTitle()));
     document.querySelectorAll("[data-screen='map']").forEach(button => button.addEventListener("click", () => this.showMap()));
     document.querySelector("#launchButton").addEventListener("click", () => this.callbacks.launch(this.selected));
-    document.querySelector("#pauseButton").addEventListener("click", () => this.callbacks.pause());
+    // Mouse clicks must not leave focus on the pause button, or Space/Enter would pause instead of dash/use.
+    document.querySelector("#pauseButton").addEventListener("click", event => { event.currentTarget.blur(); this.callbacks.pause(); });
+    // A held key must never auto-repeat into the first button of a freshly opened result or pause menu.
+    document.addEventListener("keydown", event => {
+      if (event.repeat && event.target.closest?.("#modal, #celebration")) event.preventDefault();
+    }, true);
     document.querySelector("#howButton").addEventListener("click", () => document.querySelector("#helpPanel").classList.remove("hidden"));
     document.querySelector("#closeHelp").addEventListener("click", () => document.querySelector("#helpPanel").classList.add("hidden"));
     document.querySelector("#resetButton").addEventListener("click", () => this.callbacks.reset());
@@ -249,7 +259,7 @@ export class UI {
     const element = document.querySelector("#prompt");
     if (this.cache.prompt !== text) {
       const touch = matchMedia("(pointer: coarse)").matches;
-      element.textContent = touch ? (text || "").replace(/^E · /, "USE · ") : text || "";
+      element.textContent = touch ? touchPrompt(text || "") : text || "";
       element.classList.toggle("hidden", !text);
       this.cache.prompt = text;
     }
@@ -265,6 +275,25 @@ export class UI {
     element.classList.toggle("bad", bad);
     element.classList.remove("hidden");
     this.messageTimer = setTimeout(() => element.classList.add("hidden"), 1900);
+  }
+
+  dialogueSnapshot() {
+    return this.dialogueLines?.length ? { lines: this.dialogueLines, index: this.dialogueIndex, done: this.dialogueDone } : null;
+  }
+
+  restoreDialogue(snapshot) {
+    if (!snapshot?.lines?.[snapshot.index]) return;
+    this.dialogueLines = snapshot.lines; this.dialogueIndex = snapshot.index; this.dialogueDone = snapshot.done;
+    document.querySelector("#dialogue").classList.remove("hidden");
+    this.renderDialogue();
+  }
+
+  flashDamage() {
+    const flash = document.querySelector("#damageFlash");
+    if (!flash) return;
+    flash.classList.remove("active");
+    void flash.offsetWidth;
+    flash.classList.add("active");
   }
 
   dialogue(lines, onDone) {

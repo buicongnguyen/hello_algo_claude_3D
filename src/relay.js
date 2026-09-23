@@ -25,17 +25,20 @@ export function traceRelays(positions, turns, receiver) {
   return { outputs, powered: [...powered], receiverPowered, complete: receiverPowered && powered.size === positions.length };
 }
 
+// The completing orientation that needs the fewest further clockwise quarter-turns from `turns`.
+export function solveRelays(positions, turns, receiver) {
+  let best = null;
+  for (let state = 0; state < 4 ** positions.length; state++) {
+    const candidate = positions.map((_, i) => Math.floor(state / 4 ** i) % 4);
+    if (!traceRelays(positions, candidate, receiver).complete) continue;
+    const cost = candidate.reduce((sum, value, i) => sum + (value - turns[i] + 4) % 4, 0);
+    if (!best || cost < best.cost) best = { turns: candidate, cost };
+  }
+  return best;
+}
+
 const minimumCache = new WeakMap();
 export function minimumRelayTurns(stage) {
-  if (minimumCache.has(stage)) return minimumCache.get(stage);
-  let minimum = Infinity;
-  const combinations = 4 ** stage.positions.length;
-  for (let state = 0; state < combinations; state++) {
-    const turns = stage.positions.map((_, i) => Math.floor(state / 4 ** i) % 4);
-    if (!traceRelays(stage.positions, turns, stage.receiver).complete) continue;
-    const cost = turns.reduce((sum, value, i) => sum + (value - stage.turns[i] + 4) % 4, 0);
-    minimum = Math.min(minimum, cost);
-  }
-  minimumCache.set(stage, minimum);
-  return minimum;
+  if (!minimumCache.has(stage)) minimumCache.set(stage, solveRelays(stage.positions, stage.turns, stage.receiver)?.cost ?? Infinity);
+  return minimumCache.get(stage);
 }

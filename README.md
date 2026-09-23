@@ -2,13 +2,16 @@
 
 A standalone Blender + Three.js successor to Robot Beach Adventures. KAI and BOLT find an unfinished atlas and leave Meridian City on a journey through the countryside, coast, deep ocean, open sea, sky, orbit and Moon—then return to Earth to share their discoveries.
 
-[Play Signalbreak](https://buicongnguyen.github.io/hello_algo_claude_3D/) · [Discovery journey plan and logic review](./DISCOVERY_JOURNEY_PLAN.md) · [Long-term production roadmap](./DESIGN_REVIEW.md)
+[Play Signalbreak](https://buicongnguyen.github.io/hello_algo_claude_3D/) · [AAA art and logic review](./AAA_REVIEW.md) · [Discovery journey plan and logic review](./DISCOVERY_JOURNEY_PLAN.md) · [Long-term production roadmap](./DESIGN_REVIEW.md)
 
 This is a playable browser-game foundation, with a documented roadmap toward a much higher production standard. It is not a finished AAA-scale game.
 
 ## Features
 
-- Fifteen unique Blender environments, grouped into five chapters of three stages. Each destination has its own story, discovery and one primary activity.
+- Fifteen rebuilt Blender environments with baked colour and occlusion, material-batched Draco meshes, landscapes beyond the play space and exported collision. Each has its own sky, light and fog. See [AAA_REVIEW.md](./AAA_REVIEW.md).
+- HDR rendering with MSAA, ambient occlusion, bloom, soft shadows that follow KAI, and scene-matched reflections. Quality tiers: desktop `high`, phone `medium`, software WebGL `low`.
+- Impact feedback (sparks, hit flash, knockback, hit-stop, camera shake, damage flash), smooth turning, synthesized sound cues and an ambient bed per destination.
+- Fifteen unique destinations, grouped into five chapters of three stages. Each has its own story, discovery and one primary activity.
 - Spatial relay puzzles, reef rescues, artifact scanning, prebuilt-turret defense, a research-buoy escort, aerial duel, flight routes and a museum homecoming.
 - Story mode removes campaign deadlines; Challenge mode keeps timed missions. Shield damage and boss rules matter in both modes.
 - Character-attributed radio with manual Next / Skip, an ordered itinerary, exact-location briefings and a spoiler-safe discovery atlas. Departures show the discovery and next destination.
@@ -57,7 +60,7 @@ Choose Story or Challenge in a campaign briefing. Both retain optional medals; S
 
 Run `npm ci`, `npm test`, `npm run build`. Browser checks require installed Edge or Chrome: `npm run test:smoke` checks gameplay, fallback loading and restart resource stability; `npm run test:story` checks all fifteen environments, mobile layouts, new activities, story UI and save migration.
 
-Set `BLENDER_BIN` to a Blender executable and run `npm run assets:journey` to regenerate the fifteen environment GLBs and two geology props. Their editable collections are in `assets/blender/discovery_environments.blend`; unhide the desired `ENV_*` collection. Static geometry is batched by material and the journey asset set is kept below 6 MB. `npm run assets:blender` rebuilds both original actors and journey assets.
+Set `BLENDER_BIN` to a Blender executable and run `npm run assets:journey` to regenerate the fifteen environment GLBs and two geology props. Their editable collections are in `assets/blender/discovery_environments.blend`; unhide the desired `ENV_*` collection. The shared kit lives in `tools/blender/kit.py` and `props.py`. Rebuild selected scenes with `blender --background --python tools/blender/build_journey.py -- city reef`. Static geometry is batched by material and Draco-compressed, collision footprints are exported inside each GLB, and the journey asset set is kept below 6 MB. `npm run assets:blender` rebuilds both original actors and journey assets.
 
 Choose **Reef Expeditions · New stages** to discover permanent equipment. Walk over CDs and parts to install them immediately, then use **Robot Workshop** between runs to change paint and choose your loadout. Only one software program is active at a time; physical parts occupy body, back and head slots. The clam repairs one missing shield with `E` / Use every 16 seconds. Stay within 6 m of NORI and clear robots within 3.5 m to keep the snail moving.
 

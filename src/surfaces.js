@@ -97,29 +97,3 @@ export function groundCoverTexture() {
   texture.needsUpdate = true;
   return texture;
 }
-
-export function coastalEnvironment(renderer) {
-  // Capture a matching outdoor sky once, then prefilter it for rough PBR reflections.
-  const environment = new THREE.Scene();
-  const geometry = new THREE.SphereGeometry(60, 32, 16);
-  const positions = geometry.attributes.position;
-  const colors = new Float32Array(positions.count * 3);
-  const sky = new THREE.Color(.28, .52, .8), horizon = new THREE.Color(.8, .86, .85), ground = new THREE.Color(.30, .24, .15);
-  const color = new THREE.Color();
-  for (let i = 0; i < positions.count; i++) {
-    const y = positions.getY(i) / 60;
-    color.copy(horizon).lerp(y > 0 ? sky : ground, Math.min(1, Math.abs(y) * 1.6));
-    colors.set([color.r, color.g, color.b], i * 3);
-  }
-  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  const material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide });
-  environment.add(new THREE.Mesh(geometry, material));
-  const sunGeometry = new THREE.SphereGeometry(5, 12, 8);
-  const sunMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(7, 6, 4.5) });
-  const sun = new THREE.Mesh(sunGeometry, sunMaterial);
-  sun.position.set(-20, 40, 16); environment.add(sun);
-  const generator = new THREE.PMREMGenerator(renderer);
-  const target = generator.fromScene(environment, .04, .1, 100);
-  generator.dispose(); geometry.dispose(); material.dispose(); sunGeometry.dispose(); sunMaterial.dispose();
-  return target;
-}

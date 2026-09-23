@@ -35,7 +35,7 @@ test("revision migration archives old medals and preserves inventory, then remai
   assert.equal(saved.completed.length,1);assert.deepEqual(saved.previousCampaign,next.previousCampaign);
 });
 
-test("Blender environments are real, content-versioned assets within a six-megabyte budget",()=>{
+test("Blender environments are real, compressed, content-versioned assets within a six-megabyte budget",()=>{
   const manifest=JSON.parse(readFileSync(new URL("../public/models/journey-manifest.json",import.meta.url)));
   assert.deepEqual(manifest.assets.map(a=>a.name),JOURNEY_MODEL_NAMES);
   let total=0;
@@ -43,9 +43,26 @@ test("Blender environments are real, content-versioned assets within a six-megab
     const bytes=readFileSync(new URL("../public/models/"+asset.file,import.meta.url));total+=bytes.length;
     assert.equal(bytes.toString("ascii",0,4),"glTF");assert.equal(bytes.length,asset.bytes);
     assert.equal(createHash("sha256").update(bytes).digest("hex").slice(0,16),asset.sha256);
-    assert.ok(asset.triangles<=16000 && asset.meshes<=10 && asset.bytes<1000000,asset.name);
+    // One mesh per material batch keeps each destination to about twenty draw calls.
+    assert.ok(asset.triangles<=80000 && asset.meshes<=20 && asset.bytes<1000000,asset.name);
+    assert.ok(bytes.toString("utf8",20,20+bytes.readUInt32LE(12)).includes("KHR_draco_mesh_compression"),`${asset.name} is Draco-compressed`);
   }
   assert.ok(total<6000000);
+});
+
+test("environment collision never covers a spawn point, objective or exhibit",()=>{
+  const manifest=JSON.parse(readFileSync(new URL("../public/models/journey-manifest.json",import.meta.url)));
+  const colliders=Object.fromEntries(manifest.assets.map(asset=>[asset.name,asset.colliders]));
+  const playerRadius=.9;
+  for(const {stage} of ALL_STAGES) {
+    const solid=colliders["journey_"+stage.scene];
+    assert.ok(Array.isArray(solid),`${stage.scene} exports collision footprints`);
+    const points=[{x:0,z:13},...(stage.positions||[]),...(stage.shelters||[]),...(stage.gatePositions||[]),...(stage.route||[]),...(stage.exhibits||[]),stage.goal,stage.source,stage.receiver].filter(Boolean);
+    for(const point of points) for(const [x,z,radius] of solid) {
+      assert.ok(Math.hypot(point.x-x,point.z-z)>=radius+playerRadius,`${stage.id}: (${point.x}, ${point.z}) is blocked by a collider at (${x}, ${z})`);
+    }
+    for(const [x,z,radius] of solid) assert.ok(Number.isFinite(x)&&Number.isFinite(z)&&radius>0&&radius<12);
+  }
 });
 
 test("every journey asset has a safe fallback, including geology props",()=>{

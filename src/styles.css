@@ -22,6 +22,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 button:disabled { cursor: not-allowed; opacity: 0.44; filter: grayscale(0.75); }
 
 #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+/* Screen-edge hit feedback: brief, non-blocking and drawn under the HUD. */
+.damage-flash { position: fixed; inset: 0; z-index: 7; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(255, 70, 50, 0) 52%, rgba(255, 70, 50, .5) 100%); }
+.damage-flash.active { animation: damage-flash .45s ease-out; }
+@keyframes damage-flash { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .damage-flash.active { animation-duration: .2s; } }
 .hidden { display: none !important; }
 .glass { background: linear-gradient(145deg, rgba(7, 42, 67, 0.91), rgba(2, 23, 39, 0.78)); border: 1px solid var(--line); box-shadow: 0 20px 70px rgba(1, 18, 31, 0.28), inset 0 1px rgba(255,255,255,0.08); backdrop-filter: blur(14px); }
 .screen { position: fixed; inset: 0; z-index: 10; }

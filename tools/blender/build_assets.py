@@ -17,21 +17,26 @@ bpy.ops.object.select_all(action="SELECT")
 bpy.ops.object.delete(use_global=False)
 
 
-def material(name, color, metallic=0.0, roughness=0.55, emission=None):
+def material(name, color, metallic=0.0, roughness=0.55, emission=None, coat=0.0, glow=1.4):
     mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     mat.diffuse_color = (*color, 1)
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf = next(n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
     bsdf.inputs["Base Color"].default_value = (*color, 1)
     bsdf.inputs["Metallic"].default_value = metallic
     bsdf.inputs["Roughness"].default_value = roughness
+    if coat:
+        # A lacquered clear coat (KHR_materials_clearcoat) gives painted shells a premium toy finish.
+        bsdf.inputs["Coat Weight"].default_value = coat
+        bsdf.inputs["Coat Roughness"].default_value = 0.08
     if emission:
         bsdf.inputs["Emission Color"].default_value = (*emission, 1)
-        bsdf.inputs["Emission Strength"].default_value = 0.45
+        # Above 1.0 the exporter writes KHR_materials_emissive_strength, so indicator lights reach bloom.
+        bsdf.inputs["Emission Strength"].default_value = glow
     return mat
 
 
-WHITE = material("Ceramic White", (0.72, 0.79, 0.80), 0.28, 0.36)
+WHITE = material("Ceramic White", (0.72, 0.79, 0.80), 0.18, 0.34, coat=0.7)
 NAVY = material("Joint Navy", (0.018, 0.035, 0.045), 0.12, 0.64)
 STEEL = material("Brushed Titanium", (0.32, 0.40, 0.45), 0.85, 0.29)
 GLASS = material("Optical Glass", (0.012, 0.065, 0.10), 0.45, 0.13)
@@ -39,7 +44,7 @@ SHELL = material("Shell Porcelain", (0.73, 0.47, 0.38), 0.0, 0.48)
 OCHRE = material("Starfish Ochre", (.86, .37, .075), 0.0, .68)
 LEAF_TIP = material("Palm Leaf Tips", (0.16, 0.31, 0.065), 0.0, 0.83)
 CYAN = material("Aurora Cyan", (0.02, 0.72, 0.86), 0.15, 0.18, (0.02, 0.8, 1.0))
-CORAL = material("Rust Coral", (0.72, 0.16, 0.11), 0.45, 0.48)
+CORAL = material("Rust Coral", (0.72, 0.16, 0.11), 0.45, 0.48, coat=0.35)
 ORANGE = material("Warning Orange", (1.0, 0.38, 0.08), 0.1, 0.25, (1.0, 0.18, 0.02))
 GOLD = material("Signal Gold", (0.85, 0.48, 0.07), 0.7, 0.3)
 GREEN = material("Shelter Green", (0.08, 0.62, 0.34), 0.15, 0.45)
@@ -49,7 +54,7 @@ LEAF = material("Palm Leaf", (0.05, 0.48, 0.22), 0.0, 0.72)
 PINK = material("Reef Pink", (0.8, 0.18, 0.33), 0.0, 0.52)
 PURPLE = material("Orchid Violet", (0.31, 0.12, 0.52), 0.0, 0.42)
 MINT = material("Sea Mint", (0.12, 0.54, 0.38), 0.0, 0.48)
-PEARL = material("Pearl Glow", (1.0, 0.78, 0.9), 0.45, 0.2, (0.4, 0.12, 0.32))
+PEARL = material("Pearl Glow", (1.0, 0.78, 0.9), 0.45, 0.2, (0.4, 0.12, 0.32), coat=0.8, glow=0.6)
 
 
 def set_mat(obj, mat):

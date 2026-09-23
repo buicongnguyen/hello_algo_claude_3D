@@ -23,6 +23,13 @@ export class DiscoveryActivity {
       this.terminal = game.makeEntity("exhibit", "beacon", stage.goal,1.1);
       this.terminal.marker = world.createMarker(stage.goal,0xffd166,1.8);
       world.label?.(this.terminal.object,"SHARE THE ATLAS",0xffd166,2.8);
+      // An optional victory lap: each exhibit recalls part of the journey but never gates the ending.
+      this.exhibits = (stage.exhibits || []).map((p, index) => {
+        const exhibit = { ...p, label: stage.exhibitLabels?.[index] || `Exhibit ${index + 1}`, active: true };
+        exhibit.marker = world.createMarker(p, 0xbf8cff, 1.0);
+        world.label?.(exhibit.marker, exhibit.label, 0xe0ccff, 2.2);
+        return exhibit;
+      });
     }
   }
   scanTarget() { return this.targets?.find(target=>target.active && distance(target,this.game.player)<=2.5); }
@@ -33,7 +40,8 @@ export class DiscoveryActivity {
       const target=this.scanTarget();
       if(!target) { g.ui.message("Move beside an unscanned gold marker",true); return true; }
       target.active=false; target.marker.visible=false; g.progressCount++;
-      g.world.pulse(target,1.4,0x65e5ff);
+      g.world.pulse(target,1.4,0x65e5ff); g.sfx?.("scan");
+      g.world.particles?.emit(target.x, 1.4, target.z, { count: 18, color: 0x65e5ff, speed: 2.5, up: 2, life: .8, size: .22, gravity: 0 });
       g.ui.message(`Recorded: ${target.label}`);
       if(g.progressCount===g.stage.count) g.finish(true,g.stage.outcome);
     } else if(g.stage.type === "homecoming") {
@@ -44,7 +52,14 @@ export class DiscoveryActivity {
   }
   update(dt) {
     const g=this.game;
-    if(!g.running || !this.buoy || this.index>=g.stage.route.length) return;
+    if(!g.running) return;
+    for (const exhibit of this.exhibits || []) if (exhibit.active && distance(exhibit, g.player) < 2.4) {
+      exhibit.active = false; exhibit.marker.visible = false;
+      g.metrics.exhibits = (g.metrics.exhibits || 0) + 1;
+      g.world.pulse(exhibit, 1.6, 0xbf8cff); g.sfx?.("scan");
+      g.ui.message(`Exhibit · ${exhibit.label} · ${g.metrics.exhibits}/${this.exhibits.length}`);
+    }
+    if(!this.buoy || this.index>=g.stage.route.length) return;
     this.waiting=distance(g.player,this.buoy)>6;
     if(this.waiting) return;
     const target=g.stage.route[this.index], d=distance(this.buoy,target);

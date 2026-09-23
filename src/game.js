@@ -7,7 +7,8 @@ import { actorHeight, VICTORY_DURATION } from "./presentation.js";
 import { challengeStatus, runSummary } from "./mission-report.js";
 import { ALL_STAGES } from "./missions.js";
 import { isStoryMode, storyFor } from "./story.js";
-import { DIRECTIONS, traceRelays } from "./relay.js";
+import { DIRECTIONS, solveRelays, traceRelays } from "./relay.js";
+import { rememberEmissive, turnToward } from "./feedback.js";
 import { DiscoveryActivity } from "./discovery.js";
 import { fitTravelRig } from "./districts.js";
 import { ENVIRONMENTS } from "./journey-data.js";
@@ -29,7 +30,8 @@ export class Game {
   }
 
   begin(item, { resumeCheckpoint = false } = {}) {
-    const checkpoint = resumeCheckpoint && item.stage.id === "signalbreak" ? availableCheckpoint(this.progress) : null;
+    // Only the retired Warden finale has checkpoint state; no other stage may restore one.
+    const checkpoint = resumeCheckpoint && item.stage.type === "finale" ? availableCheckpoint(this.progress) : null;
     this.cancelVictory();
     this.item = item;
     this.stage = item.stage;
@@ -70,7 +72,10 @@ export class Game {
     this.pads = [];
     this.gates = [];
     this.wrongActions = 0;
-    this.metrics = { damageTaken: 0, recruited: 0, calls: 0, frozenEnemies: 0 };
+    this.metrics = { damageTaken: 0, recruited: 0, calls: 0, frozenEnemies: 0, exhibits: 0 };
+    this.hitStop = 0;
+    this.aimTime = 0;
+    this.stepTimer = 0;
     this.phase = "active";
     this.spawned = 0;
     this.escaped = 0;
@@ -78,12 +83,18 @@ export class Game {
     this.hudElapsed = 0.1;
     this.world.setCampaign?.(this.progress);
     this.player = { x: 0, z: 13, speed: 6.3, radius: 0.9, object: this.world.createActor("kai", { x: 0, z: 13 }, 0.94) };
-    this.player.object.rotation.y = Math.PI;
+    this.player.object.rotation.order = "YXZ";
+    this.player.object.rotation.y = this.player.facing = Math.PI;
+    this.world.particles?.clear();
     this.lastMove = { x: -Math.sin(this.world.cameraYaw || 0), z: -Math.cos(this.world.cameraYaw || 0) };
     this.setupMission();
     this.combat = new Combat(this);
     this.refreshEquipment(false);
-    fitTravelRig(this.world,this.player.object,ENVIRONMENTS[this.stage.scene]?.travel);
+    const travel = ENVIRONMENTS[this.stage.scene]?.travel;
+    // Equipped Twin Thrusters already are a flight rig; never stack a second pair on KAI.
+    fitTravelRig(this.world, this.player.object, travel === "fly" && this.progress.equipment.equipped.back === "thrusters" ? null : travel);
+    this.travel = travel || "walk";
+    this.ui.callbacks?.ambience?.(this.stage);
     if (["scan","escort","homecoming"].includes(this.stage.type)) this.discovery = new DiscoveryActivity(this);
     if (this.combat.enabled && this.progress.equipment.equipped.software === "frost") this.combat.freezeCharges = 1;
     if (this.stage.type === "expedition") this.expedition = new Expedition(this);
@@ -177,12 +188,16 @@ export class Game {
   refreshRelays() {
     for (const line of this.relayLines) this.world.release?.(line);
     this.relayState = traceRelays(this.stage.positions, this.relayNodes.map(node => node.turn), this.stage.receiver);
+    // Progress and guidance follow the nearest complete orientation, so loops never read as solved.
+    this.relaySolution = solveRelays(this.stage.positions, this.relayNodes.map(node => node.turn), this.stage.receiver);
+    const solved = this.relaySolution && traceRelays(this.stage.positions, this.relaySolution.turns, this.stage.receiver);
+    this.relayOrder = solved?.powered || [];
     this.relayLines = this.relayState.outputs.map((output, id) => {
       this.relayNodes[id].heading.rotation.y = -this.relayNodes[id].turn * Math.PI / 2;
       this.relayNodes[id].heading.children[0].material.color.setHex(output.powered ? 0xffd166 : 0x71899c);
       return this.world.createRoute([output.from, output.to], output.powered ? 0x65e5ff : 0x536778, { beam: output.powered });
     });
-    this.progressCount = this.relayState.outputs.filter(output => output.powered && output.hit !== null).length;
+    this.progressCount = solved ? this.relayState.outputs.filter((output, id) => output.powered && output.hit === solved.outputs[id].hit).length : 0;
   }
 
   turnRelay(range = 2.5) {
@@ -190,7 +205,7 @@ export class Game {
     const node = [...this.relayNodes].sort((a, b) => distance(a, this.player) - distance(b, this.player))[0];
     if (!node || distance(node, this.player) > range) return this.ui.message("Move beside a relay. Q or E turns its arrow clockwise.", true);
     node.turn = (node.turn + 1) % 4; this.relayTurns++;
-    this.world.pulse(node, 1, 0xffd166); this.refreshRelays();
+    this.world.pulse(node, 1, 0xffd166); this.refreshRelays(); this.sfx("turn");
     if (this.relayState.complete) return this.finish(true, "Every relay carries power into the receiver. The repaired network answers.");
     this.ui.message(`Relay ${String.fromCharCode(65 + node.id)} points ${DIRECTIONS[node.turn].name}. ${this.relayState.powered.includes(node.id) ? "Follow its beam." : "It is waiting for upstream power."}`);
   }
@@ -226,14 +241,15 @@ export class Game {
     this.relay = this.makeEntity("relay", "beacon", { x: 0, z: -11 }, 1.1, {});
     this.relay.marker = this.world.createMarker({ x: 0, z: -11 }, 0x65e5ff, 1.8);
     const pads = this.stage.pads === 2 ? [{ x: -6, z: -3 }, { x: 6, z: -3 }] : [{ x: -7, z: -3 }, { x: 0, z: -3 }, { x: 7, z: -3 }];
-    this.approaches = pads.map(position => ({ x: position.x, z: 14 }));
+    // Prebuilt turrets guard the flanks only: the open centre lane needs KAI, so the stage cannot win itself.
+    this.approaches = this.stage.prebuilt ? [{ x: -6, z: 14 }, { x: 0, z: 14 }, { x: 6, z: 14 }] : pads.map(position => ({ x: position.x, z: 14 }));
     this.approaches.forEach(position => this.world.createRoute([position, this.relay], 0xff765f));
     this.pads = pads.slice(0, this.stage.pads).map((position, index) => ({ position, index, placed: false, marker: this.world.createMarker(position, 0xffd166, 1.55) }));
     this.phase = "prepare";
     if (this.stage.prebuilt) {
       for (const pad of this.pads) {
         pad.placed = true; pad.marker.visible = false;
-        this.turrets.push({...pad.position, object:this.world.createActor("turret",pad.position,1),cooldown:0});
+        this.turrets.push({...pad.position, object:this.world.createActor("turret",pad.position,1),cooldown:0,range:5.5});
       }
       this.phase = "battle";
     }
@@ -292,7 +308,9 @@ export class Game {
     const model = variant === "dog" ? "zombie_dog" : variant === "drone" ? "rust_drone" : "rust_scout";
     const enemy = this.makeEntity(boss ? "boss" : "enemy", model, position, boss ? 1.24 : variant === "bot" ? 0.56 : 0.78, { health, maxHealth: health, speed: boss ? 3.7 : variant === "dog" ? 3.4 : 2.4, boss, variant, attackState: "approach", attackTime: 0, frozen: 0 });
     if (this.stage.type === "defense" && this.stage.id === "approaches") { enemy.health = 3; enemy.maxHealth = 3; enemy.speed = 2.8; }
+    if (this.stage.type === "defense" && this.stage.prebuilt && !boss) { enemy.health = 3; enemy.maxHealth = 3; }
     this.cloneMaterials(enemy.object);
+    rememberEmissive(enemy.object);
     enemy.healthBar = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xff745c, depthTest: false }));
     enemy.healthBar.scale.set(1.5, 0.13, 1);
     enemy.healthBar.position.y = variant === "drone" ? 1.35 : variant === "dog" ? 2.35 : 3.2;
@@ -306,11 +324,29 @@ export class Game {
   }
 
   tint(object, color, emissive = 0) {
+    const target = new THREE.Color(color);
     object.traverse(child => {
       if (!child.isMesh || !child.material?.color) return;
-      child.material.color.lerp(new THREE.Color(color), 0.72);
-      if (child.material.emissive) { child.material.emissive.set(color); child.material.emissiveIntensity = emissive; }
+      // Blend from the authored colour, so repeated boss phases never drift towards grey.
+      child.userData.baseColor ??= child.material.color.clone();
+      child.material.color.copy(child.userData.baseColor).lerp(target, 0.72);
+      if (child.material.emissive) {
+        child.material.emissive.set(color); child.material.emissiveIntensity = emissive;
+        child.userData.baseEmissive = child.material.emissive.clone(); child.userData.baseEmissiveIntensity = emissive;
+      }
     });
+  }
+
+  sfx(kind) { this.ui.callbacks?.sound?.(kind); }
+
+  nearestCell(range) {
+    let best = null, limit = range;
+    for (const entity of this.entities) {
+      if (entity.kind !== "cell" || !entity.active) continue;
+      const d = distance(entity, this.player);
+      if (d <= limit) { best = entity; limit = d; }
+    }
+    return best;
   }
 
   routePositions(count) {
@@ -339,6 +375,9 @@ export class Game {
     }
     if (!this.running || this.paused) return;
     if (this.input.consume("pause")) return this.pause();
+    // A few frames of hit-stop sell impacts; the world keeps animating around the frozen moment.
+    if (this.hitStop > 0) { this.hitStop = Math.max(0, this.hitStop - dt); return; }
+    this.aimTime = Math.max(0, this.aimTime - dt);
     if (this.stage.type === "roam") {
       this.elapsed += dt;
       this.pulseCooldown = Math.max(0, this.pulseCooldown - dt);
@@ -384,7 +423,8 @@ export class Game {
     const yaw = this.world.cameraYaw || 0;
     const direction = { x: move.x * Math.cos(yaw) + move.y * Math.sin(yaw), z: -move.x * Math.sin(yaw) + move.y * Math.cos(yaw) };
     if (Math.hypot(move.x, move.y) > 0.05) this.lastMove = direction;
-    if (this.dashTime > 0 || Math.hypot(move.x, move.y) > 0.05) {
+    const moving = this.dashTime > 0 || Math.hypot(move.x, move.y) > 0.05;
+    if (moving) {
       const heading = this.dashTime > 0 ? this.dashMove : direction;
       const speed = this.player.speed * (this.dashTime > 0 ? 2.4 : 1);
       this.player.x = clamp(this.player.x + heading.x * speed * dt, -18, 18);
@@ -393,9 +433,16 @@ export class Game {
       const islandLimit = 18.5;
       const radius = Math.hypot(this.player.x, this.player.z);
       if (radius > islandLimit) { this.player.x *= islandLimit / radius; this.player.z *= islandLimit / radius; }
-      this.player.object.rotation.y = Math.atan2(heading.x, heading.z);
+      this.player.facing = Math.atan2(heading.x, heading.z);
       this.player.object.position.set(this.player.x, 0.55 + Math.sin(this.elapsed * 10) * 0.035, this.player.z);
-    }
+      this.stepTimer -= dt;
+      if (this.stepTimer <= 0) { this.stepTimer = this.dashTime > 0 ? .05 : .28; this.footstep(); }
+    } else this.player.object.position.y = 0.55 + Math.sin(this.elapsed * 2.2) * 0.012;
+    // Turn and lean smoothly; while firing, KAI keeps facing the target it is shooting at.
+    const object = this.player.object;
+    object.rotation.y = turnToward(object.rotation.y, this.aimTime > 0 ? this.aimYaw : this.player.facing, dt * (this.dashTime > 0 ? 24 : 15));
+    const lean = this.progress.settings.reducedMotion ? 0 : this.dashTime > 0 ? .2 : moving ? .07 : 0;
+    object.rotation.x += (lean - object.rotation.x) * Math.min(1, dt * 10);
     this.player.object.rotation.z *= Math.max(0, 1 - dt * 8);
     this.world.animateActor?.(this.player.object, this.elapsed, Math.hypot(move.x, move.y) > 0.05 || this.dashTime > 0);
     if (this.carry) {
@@ -404,6 +451,14 @@ export class Game {
       this.carry.object.position.set(this.player.x, actorHeight(this.player.object, 3.25), this.player.z);
       this.carry.object.rotation.y += dt * 2;
     }
+  }
+
+  footstep() {
+    const p = this.player, particles = this.world.particles;
+    if (!particles) return;
+    if (this.travel === "dive") particles.emit(p.x, 1.6, p.z, { count: 2, color: 0xcff7ff, speed: .4, up: 1.4, life: 1.1, size: .14, gravity: 1.2, drag: 1 });
+    else if (this.travel === "fly") particles.emit(p.x, .7, p.z, { count: 2, color: 0xffb45a, speed: .6, up: -1.5, life: .35, size: .16, gravity: -3 });
+    else if (this.travel !== "float") particles.emit(p.x, .5, p.z, { count: 2, color: this.travel === "moon" ? 0x9a9894 : 0x8f8272, speed: .7, up: .5, life: .5, size: .22, gravity: -.5, drag: 3 });
   }
 
   updateMission(dt) {
@@ -455,9 +510,8 @@ export class Game {
       if (this.stage.type === "defense" && distance(enemy, this.relay) < 1.4) {
         this.disableEntity(enemy, false, false);
         this.escaped += 1;
-        this.shields = Math.max(0, this.shields - 1);
-        this.invulnerable = 0;
-        this.ui.message("A scout reached the relay!", true);
+        // A breach already decides the outcome, so fail immediately instead of playing out a lost wave.
+        return this.finish(false, this.stage.prebuilt ? "A scout reached the receiver. The turrets cover the flanks; hold the open centre lane yourself." : "A scout reached the relay. Place turrets across every approach.");
       }
       if (this.stage.type === "finale" && this.core && distance(enemy, this.core) < 1.5) {
         this.disableEntity(enemy, false, false);
@@ -478,12 +532,12 @@ export class Game {
     }
     for (const turret of this.turrets || []) {
       turret.cooldown = Math.max(0, turret.cooldown - dt);
-      const target = this.entities.find(entity => entity.kind === "enemy" && entity.active && distance(turret, entity) < 8.5);
+      const target = this.entities.find(entity => entity.kind === "enemy" && entity.active && distance(turret, entity) < (turret.range || 8.5));
       if (target && turret.cooldown <= 0) {
         turret.object.rotation.y = Math.atan2(target.x - turret.x, target.z - turret.z);
         turret.cooldown = 0.8;
         this.combat.makeBolt([turret, target], 0xffd166);
-        this.combat.hit(target, 1);
+        this.combat.hit(target, 1, turret);
       }
     }
     if (this.spawned >= this.stage.count && !this.entities.some(entity => entity.kind === "enemy" && entity.active)) {
@@ -540,6 +594,8 @@ export class Game {
     if (!gate || distance(this.player, gate.position) >= 1.8) return;
     gate.object.visible = false;
     this.progressCount += 1;
+    this.sfx("gate");
+    this.world.particles?.emit(gate.position.x, 1.2, gate.position.z, { count: 22, color: 0xffd166, speed: 4, up: 1.5, life: .6, size: .24, gravity: -1 });
     const next = this.gates[this.progressCount];
     if (next) {
       next.active = true;
@@ -618,6 +674,7 @@ export class Game {
     const damage = this.upgrades.pulseDamage;
     this.pulseCooldown = 1.1;
     this.world.pulse(this.player, radius, 0x65e5ff);
+    this.sfx("pulse");
     let hits = 0;
     for (const entity of this.entities.filter(entity => entity.active && distance(entity, this.player) <= radius)) {
       if (!this.running) break;
@@ -645,6 +702,8 @@ export class Game {
     entity.object.visible = false;
     if (entity.marker) entity.marker.visible = false;
     this.progressCount += 1;
+    this.sfx("collect");
+    this.world.particles?.emit(entity.x, 1.1, entity.z, { count: 24, color: 0x65e5ff, speed: 3.5, up: 2.5, life: .75, size: .26, gravity: -1.5 });
     this.ui.message(`Energy collected · ${this.progressCount}/${this.stage.count}`);
     if (this.progressCount >= this.stage.count) {
       if (this.goal) { this.goal.locked = false; this.ui.message("All cells charged—repair the gold beacon"); }
@@ -674,6 +733,8 @@ export class Game {
     const length = Math.hypot(this.lastMove.x, this.lastMove.z) || 1;
     this.dashMove = { x: this.lastMove.x / length, z: this.lastMove.z / length };
     this.invulnerable = Math.max(this.invulnerable, this.dashTime);
+    this.sfx("dash");
+    this.world.particles?.emit(this.player.x, .8, this.player.z, { count: 14, color: this.travel === "dive" ? 0xcff7ff : 0x9fe8ff, speed: 3, up: .5, life: .4, size: .24, gravity: 0, drag: 4 });
   }
 
   interact() {
@@ -705,6 +766,9 @@ export class Game {
       return this.finish(true, "The Warden is repaired and the Aurora signal is restored. AURORA carries the good news to every island. The whole beach is ready for the festival!");
     }
     if (this.combat.repair()) return;
+    // Use works on a nearby battery too; players reach for the action key first.
+    const cell = this.nearestCell(this.upgrades.pulseRadius);
+    if (cell) return this.collect(cell);
     this.ui.message("Move closer to the highlighted target", true);
   }
 
@@ -754,6 +818,12 @@ export class Game {
     this.world.animateActor?.(entity.object, 0, false);
     this.combat?.onDisabled(entity, defeated);
     if (count) this.progressCount += 1;
+    if (defeated) {
+      this.world.particles?.emit(entity.x, 1.2, entity.z, { count: entity.boss ? 60 : 26, color: 0x65e5ff, speed: entity.boss ? 7 : 5, up: 2.5, life: .75, size: .3, gravity: -3 });
+      this.world.shake?.(entity.boss ? .7 : .2);
+      this.hitStop = entity.boss ? .14 : .045;
+      this.sfx("defeat");
+    }
     if (entity.kind === "boss") {
       if (this.stage.type === "boss") this.finish(true, "The Rust Captain rebooted peacefully and released the third fragment.");
       return;
@@ -773,6 +843,11 @@ export class Game {
       this.metrics.damageTaken += 1;
       this.ui.message(message, true);
       if (!this.progress.settings.reducedMotion) this.player.object.rotation.z = 0.12;
+      this.world.shake?.(.55);
+      this.ui.flashDamage?.();
+      this.sfx("hurt");
+      this.hitStop = .07;
+      this.world.particles?.emit(this.player.x, 1.4, this.player.z, { count: 16, color: 0xff6a4a, speed: 4, up: 1.5, life: .4, size: .2, gravity: -5 });
     }
   }
 
@@ -793,6 +868,7 @@ export class Game {
     else if (this.stage.type === "defense" && this.phase === "ready") text = "E · START DEFENSE WAVE";
     else if (this.goal && distance(this.player, this.goal) < 2.2) text = this.goal.locked ? (this.stage.type === "combat" ? "REBOOT THE REMAINING SCOUTS" : "BEACON NEEDS MORE ENERGY") : "E · REPAIR BEACON";
     else if (this.stage.type === "finale" && this.phase === "launch" && distance(this.player, this.rocketGoal) < 3) text = "E · LAUNCH FESTIVAL ROCKET";
+    else if (["collect", "race-collect"].includes(this.stage.type) && this.nearestCell(this.upgrades.pulseRadius)) text = "E / Q · COLLECT BATTERY";
     if (!text && this.combat.repairTarget()) text = "E · REPAIR TEAMMATE · 2 SCRAP";
     this.ui.prompt(text);
   }
@@ -853,8 +929,9 @@ export class Game {
       return node ? { ...node, label: `${this.sequenceIndex + 1} · ${node.label} · Pulse` } : null;
     }
     if (this.stage.type === "relay") {
-      const disconnected = this.relayState.outputs.findIndex(output => output.powered && (output.hit === null || !this.relayState.receiverPowered && output.hit === 0));
-      const node = disconnected >= 0 ? this.relayNodes[disconnected] : [...this.relayNodes].sort((a, b) => distance(this.player, a) - distance(this.player, b))[0];
+      // Point at the first relay, in beam order, that still differs from the nearest solution.
+      const id = this.relayOrder.find(index => this.relayNodes[index].turn !== this.relaySolution?.turns[index]);
+      const node = id !== undefined ? this.relayNodes[id] : [...this.relayNodes].sort((a, b) => distance(this.player, a) - distance(this.player, b))[0];
       return { ...node, label: "Relay arrow · Q / Use to turn" };
     }
     if (this.stage.type === "race") {
@@ -871,12 +948,14 @@ export class Game {
   }
 
   pause() {
-    if (!this.running) return;
+    if (!this.running || this.paused) return;
     this.paused = true;
     this.input.clear();
     this.input.enabled = false;
+    // The pause menu covers the radio; resuming must bring back any unread lines.
+    const radio = this.ui.dialogueSnapshot?.();
     this.ui.modal({ icon: "Ⅱ", eyebrow: "Mission paused", title: this.stage.name, text: `${this.stage.objective}${challengeStatus(this) ? ` Optional: ${challengeStatus(this).text}.` : ""}`, actions: [
-      { label: "Resume", run: () => { this.input.clear(); this.input.enabled = true; this.paused = false; } },
+      { label: "Resume", run: () => { this.input.clear(); this.input.enabled = true; this.paused = false; if (radio) this.ui.restoreDialogue?.(radio); } },
       { label: "Restart", run: () => this.begin(this.item) },
       this.returnAction(),
     ] });
@@ -976,6 +1055,8 @@ export class Game {
 
   stop() {
     this.cancelVictory();
+    this.world.particles?.clear();
+    this.ui.callbacks?.ambience?.(null);
     this.running = false;
     this.paused = false;
     this.world.clearMission();

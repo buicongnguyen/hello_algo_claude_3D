@@ -17,7 +17,7 @@ assert.ok(executablePath, "Chrome or Edge is required");
 const server = process.env.GAME_URL ? null : spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(PORT), "--strictPort"], { cwd: ROOT, stdio: ["ignore", "pipe", "inherit"] });
 if (server) await new Promise((resolve, reject) => {
   const timeout = setTimeout(() => reject(new Error("Vite did not start")), 12000);
-  server.stdout.on("data", chunk => { if (String(chunk).includes(`http://127.0.0.1:${PORT}`)) { clearTimeout(timeout); resolve(); } });
+  server.stdout.on("data", chunk => { if (String(chunk).replace(/\x1b\[[0-9;]*m/g, "").includes(`http://127.0.0.1:${PORT}`)) { clearTimeout(timeout); resolve(); } });
   server.once("exit", code => reject(new Error(`Vite exited early: ${code}`)));
 });
 let browser;
@@ -55,14 +55,16 @@ try {
       const {game,world,ui,catalog}=window.__ROBOT_BEACH__,item=catalog.find(i=>i.stage.id===id);
       game.begin(item);game.paused=true;ui.hideDialogue();game.updateHUD(.1);
       world.update(.05,game.player,true);
-      return {id,scene:world.journeyRoot?.name,shared:world.shared.visible,sky:world.scene.background.getHex(),calls:world.renderer.info.render.calls,triangles:world.renderer.info.render.triangles,failed:world.failedModels};
+      const scene=world.pipeline.sceneStats;
+      return {id,scene:world.journeyRoot?.name,shared:world.shared.visible,sky:world.scene.background.getHex(),calls:scene.calls,triangles:scene.triangles,frameCalls:world.renderer.info.render.calls,frameTriangles:world.renderer.info.render.triangles,quality:world.quality,failed:world.failedModels};
     },id);
     reports.push(report);
     await page.screenshot({path:join(OUT,"scene-"+id+".png")});
   }
   assert.equal(new Set(reports.map(r=>r.scene)).size,15);
   assert.equal(new Set(reports.map(r=>r.sky)).size,15);
-  assert.ok(reports.every(r=>r.scene && !r.shared && r.calls<=450 && r.triangles<=400000 && !r.failed.length));
+  // Scene budget (shadow + main view) is unchanged; the full frame adds ambient occlusion and bloom passes.
+  assert.ok(reports.every(r=>r.scene && !r.shared && r.calls<=450 && r.triangles<=400000 && r.frameCalls<=900 && r.frameTriangles<=650000 && !r.failed.length),JSON.stringify(reports.filter(r=>r.calls>450||r.triangles>400000||r.frameCalls>900||r.frameTriangles>650000)));
   console.log("Journey rendering:",JSON.stringify(reports));
   const relay=await page.evaluate(()=>{
     const {game,catalog,ui}=window.__ROBOT_BEACH__;

@@ -378,7 +378,7 @@ test("field challenges count successful calls, repairs and distinct freezes only
 });
 
 test("missing challenges never block victory and healing cannot erase damage", () => {
-  const { game, ui } = harness(); game.begin(findStage("little-wave"));
+  const { game, ui } = harness(); game.begin(findStage("split-current"));
   game.damagePlayer(); game.shields = game.upgrades.maxShields;
   assert.equal(challengeStatus(game).done, false);
   game.finish(true, "Rescued"); assert.equal(ui.outcome.eyebrow, "Mission complete");
@@ -543,6 +543,9 @@ test("repairs spend scrap once and recruited robots fight only hostiles", () => 
 test("animal calls have a duration and a bounded crew", () => {
   const { game } = harness(); game.begin(BRAWL);
   game.combat.whistles = 2;
+  assert.equal(game.combat.callAnimals(), false, "no whistle is spent with nothing to fight");
+  assert.equal(game.combat.whistles, 2);
+  const robot = game.spawnEnemy(false, 0); robot.x = game.player.x + 3; robot.z = game.player.z;
   game.combat.callAnimals(); game.combat.callAnimals();
   assert.equal(game.combat.animals.length, 3);
   assert.equal(game.combat.whistles, 0);

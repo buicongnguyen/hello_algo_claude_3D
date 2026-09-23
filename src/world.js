@@ -1,7 +1,12 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+import { SkyDome } from "./sky.js";
+import { RenderPipeline, resolveQuality, isSoftwareRenderer, QUALITY_PROFILES } from "./render.js";
+import { atmosphereFor, sunDirection } from "./atmosphere.js";
+import { Particles, Shake } from "./feedback.js";
 import { dressRobot } from "./equipment.js";
-import { createSurfaces, finishMaterial, coastalEnvironment, grassGeometry, groundCoverTexture } from "./surfaces.js";
+import { createSurfaces, finishMaterial, grassGeometry, groundCoverTexture } from "./surfaces.js";
 import { buildDistrict } from "./districts.js";
 import { JOURNEY_MODEL_NAMES, ENVIRONMENTS } from "./journey-data.js";
 import { actorScale, cameraZoom, CAMERA_YAW, departureHeight, limbPhase, VICTORY_DURATION } from "./presentation.js";
@@ -21,15 +26,20 @@ export class World {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.96;
+    this.renderer.toneMappingExposure = 1;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.pipeline = new RenderPipeline(this.renderer, this.scene, this.camera);
+    this.softwareRenderer = isSoftwareRenderer(this.renderer);
+    this.sunOffset = new THREE.Vector3(0, 1, 0);
+    this.shadowFocus = new THREE.Vector3();
     this.models = new Map();
     this.expectedModelCount = MODEL_NAMES.length + JOURNEY_MODEL_NAMES.length;
     this.assetResources = new Set();
     this.effects = [];
     this.effectPool = [];
     this.markers = [];
+    this.colliders = new Map();
     this.cameraYaw = CAMERA_YAW;
     this.desiredCamera = new THREE.Vector3();
     this.desiredTarget = new THREE.Vector3();
@@ -37,6 +47,12 @@ export class World {
     this.mission = new THREE.Group();
     this.celebrationRoot = new THREE.Group();
     this.scene.add(this.shared, this.mission, this.celebrationRoot);
+    // Feedback lives outside the mission group, so clearing a mission never disposes the shared pool.
+    this.particles = new Particles();
+    this.scene.add(this.particles.points);
+    this.shakeState = new Shake();
+    this.shakeOffset = new THREE.Vector3();
+    this.drawingSize = new THREE.Vector2();
     this.cameraTarget = new THREE.Vector3();
     this.clock = 0;
     this.resize = this.resize.bind(this);
@@ -48,6 +64,9 @@ export class World {
     this.buildEnvironment();
     this.setQuality(this.settings.quality || "auto");
     const loader = new GLTFLoader();
+    // Journey environments are Draco-compressed; the bundler fingerprints the decoder next to the app.
+    this.draco = new DRACOLoader();
+    loader.setDRACOLoader(this.draco);
     let versions = {};
     const manifestAbort = new AbortController();
     const manifestTimeout = setTimeout(() => manifestAbort.abort(), 4000);
@@ -67,6 +86,8 @@ export class World {
       try {
         const gltf = await loader.loadAsync(`./models/${name}.glb${versions[name] ? `?v=${encodeURIComponent(versions[name])}` : ""}`);
         this.models.set(name, gltf.scene);
+        // Collision footprints travel inside the environment GLB (glTF extras), so they never depend on the manifest.
+        gltf.scene.traverse(object => { if (typeof object.userData.colliders === "string") this.colliders.set(name, JSON.parse(object.userData.colliders)); });
       } catch {
         this.failedModels.push(name);
         this.models.set(name, this.fallback(name));
@@ -74,15 +95,22 @@ export class World {
       loaded += 1;
       onProgress(loaded / this.expectedModelCount, name);
     }));
+    // Journey scenes use metre-scaled UVs, so they share each micro-surface image at repeat 1.
+    const metric = surface => Object.fromEntries(Object.entries(surface).map(([key, texture]) => {
+      const copy = texture.clone(); copy.repeat.set(1, 1); this.assetResources.add(copy); return [key, copy];
+    }));
+    const journey = { sand: metric(this.surfaces.sand), wood: metric(this.surfaces.wood), water: metric(this.surfaces.water) };
+    this.journeyWater = journey.water.normalMap;
     for (const model of this.models.values()) model.traverse(child => {
       if (child.geometry) this.assetResources.add(child.geometry);
       for (const material of child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : []) {
         finishMaterial(material, this.surfaces);
-        if (material.name.startsWith("Journey Water")) { material.normalMap = this.surfaces.water.normalMap; material.normalScale = new THREE.Vector2(.5,.5); }
-        if (/^Journey (.*sand|.*silt|Regolith|Abyss basalt|.*paving|Limestone|Meadow)/i.test(material.name)) {
-          material.map=this.surfaces.sand.map;material.normalMap=this.surfaces.sand.normalMap;material.normalScale.setScalar(.3);
+        if (material.name.startsWith("Journey Water")) { material.normalMap = journey.water.normalMap; material.normalScale = new THREE.Vector2(.45, .45); }
+        if (/^Journey (Ground|Stone)/.test(material.name)) {
+          material.map = journey.sand.map; material.normalMap = journey.sand.normalMap; material.normalScale.setScalar(.35);
         }
-        if (material.name.startsWith("Journey Wood")) { material.map=this.surfaces.wood.map;material.normalMap=this.surfaces.wood.normalMap;material.normalScale.setScalar(.2); }
+        if (material.name.startsWith("Journey Cloud")) { material.emissive.setHex(0xffffff); material.emissiveIntensity = .2; }
+        if (/^Journey (Wood|Bark)/.test(material.name)) { material.map = journey.wood.map; material.normalMap = journey.wood.normalMap; material.normalScale.setScalar(.25); }
         this.assetResources.add(material);
         for (const value of Object.values(material)) if (value?.isTexture) this.assetResources.add(value);
       }
@@ -95,22 +123,31 @@ export class World {
   buildEnvironment() {
     this.surfaces = createSurfaces(this.renderer);
     for (const surface of Object.values(this.surfaces)) for (const texture of Object.values(surface)) this.assetResources.add(texture);
-    this.environmentTarget = coastalEnvironment(this.renderer);
-    this.scene.environment = this.environmentTarget.texture;
+    this.sky = new SkyDome(this.renderer);
+    this.scene.add(this.sky.mesh);
     this.scene.environmentIntensity = .3;
-    const hemi = new THREE.HemisphereLight(0xc5ecff, 0xb38957, .45);
-    this.scene.add(hemi);
+    this.hemi = new THREE.HemisphereLight(0xc5ecff, 0xb38957, .45);
+    this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xffe4bb, 2.2);
     this.sun.position.set(-12, 25, 10);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1024, 1024);
-    this.sun.shadow.normalBias = 0.035;
-    this.sun.shadow.bias = -0.00015;
-    this.sun.shadow.camera.left = -28;
-    this.sun.shadow.camera.right = 28;
-    this.sun.shadow.camera.top = 28;
-    this.sun.shadow.camera.bottom = -28;
-    this.scene.add(this.sun);
+    this.sun.shadow.normalBias = 0.03;
+    this.sun.shadow.bias = -0.0002;
+    this.sun.shadow.radius = 2.5;
+    // A tight frustum that follows the hero gives crisp contact shadows instead of one blurry island map.
+    this.sun.shadow.camera.left = -24;
+    this.sun.shadow.camera.right = 24;
+    this.sun.shadow.camera.top = 24;
+    this.sun.shadow.camera.bottom = -24;
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 120;
+    this.scene.add(this.sun, this.sun.target);
+    // Cool rim light separates characters from busy scenery without adding shadow cost.
+    this.rim = new THREE.DirectionalLight(0x9fd8ff, .55);
+    this.rim.position.set(14, 9, -18);
+    this.scene.add(this.rim);
+    this.applyAtmosphere("island");
 
     const waterMat = new THREE.MeshStandardMaterial({ color: 0x168bc0, roughness: 0.24, metalness: 0.15, normalMap: this.surfaces.water.normalMap, normalScale: new THREE.Vector2(.65, .65) });
     this.water = new THREE.Mesh(new THREE.CircleGeometry(70, 64), waterMat);
@@ -236,19 +273,43 @@ export class World {
     this.landmarks.add(this.beamPivot);
   }
 
+  applyAtmosphere(key) {
+    const look = atmosphereFor(key);
+    this.atmosphere = look;
+    this.atmosphereKey = key;
+    // The horizon doubles as the clear color, so every destination keeps a distinct fallback sky.
+    this.scene.background = new THREE.Color(look.horizon);
+    this.scene.fog.color.setHex(look.fog);
+    this.scene.fog.density = look.density;
+    const sun = sunDirection(look);
+    this.sunOffset.set(sun.x, sun.y, sun.z).multiplyScalar(55);
+    this.sun.color.setHex(look.sunColor);
+    this.sun.intensity = look.sunIntensity;
+    this.hemi.color.setHex(look.hemiSky);
+    this.hemi.groundColor.setHex(look.hemiGround);
+    this.hemi.intensity = look.hemi;
+    this.rim.color.setHex(look.rim);
+    this.rim.intensity = look.rimIntensity;
+    this.rim.position.set(-sun.x * 20, 9, -sun.z * 20 - 6);
+    this.renderer.toneMappingExposure = look.exposure;
+    this.pipeline.setBloom(look.bloom);
+    this.flash = 0;
+    // Prefiltering is deferred to the next frame so a scene change bakes one reflection map, not two.
+    this.environmentDirty = true;
+  }
+
+  refreshEnvironmentMap() {
+    if (!this.environmentDirty) return;
+    this.environmentDirty = false;
+    this.scene.environment = this.sky.apply(this.atmosphere);
+    this.scene.environmentIntensity = this.atmosphere.environment;
+  }
+
   setScenario(theme) {
-    this.scene.fog.density = .016;
     this.theme = theme;
-    const palettes = {
-      coral: [0x74dfdf, 0x76d8d2, 0xe9b3a8, 0xffccdf],
-      scrapyard: [0x7b71ba, 0x9a8acc, 0x9380aa, 0xcbbdff],
-      moonpool: [0x19294d, 0x334d78, 0x557b94, 0x99bfff],
-    };
-    const palette = palettes[theme] || [0x6fc8ef, 0x9bd9ee, 0xf6db91, 0xffe4bb];
-    this.scene.background.setHex(palette[0]); this.scene.fog.color.setHex(palette[1]);
-    this.ground.material.color.setHex(palette[2]); this.island.material.color.setHex(palette[2]);
-    this.sun.color.setHex(palette[3]); this.sun.intensity = theme === "moonpool" ? 1.6 : 2.2;
-    this.scene.environmentIntensity = theme === "moonpool" ? .16 : .3;
+    const grounds = { coral: 0xe9b3a8, scrapyard: 0x9380aa, moonpool: 0x557b94 };
+    this.applyAtmosphere(theme || "island");
+    this.ground.material.color.setHex(grounds[theme] || 0xf6db91); this.island.material.color.setHex(grounds[theme] || 0xf6db91);
     if (this.landmarks) this.landmarks.visible = !theme;
     if (this.landmarks) for (const child of this.landmarks.children) child.visible = true;
     this.boardwalk.visible = this.planks.visible = !theme;
@@ -334,7 +395,7 @@ export class World {
     object.scale.setScalar(actorScale(name, scale, nativeScale));
     object.traverse(child => {
       if (child.isMesh) {
-        child.castShadow = this.settings.quality !== "low";
+        child.castShadow = true;
         child.receiveShadow = true;
       }
     });
@@ -443,7 +504,7 @@ export class World {
   clearMission() {
     this.clearCelebration();
     if (this.journeyRoot) this.release(this.journeyRoot);
-    this.journeyRoot = this.journeyCompanion = this.journeyParticles = this.journeyPlanet = this.journeyEnvironment = null;
+    this.journeyRoot = this.journeyCompanion = this.journeyParticles = this.journeyPlanet = this.journeyEnvironment = this.journeyRays = null;
     this.shared.visible = true;
     this.previewActor = null;
     for (const mesh of this.effects) { mesh.removeFromParent(); this.effectPool.push(mesh); }
@@ -478,10 +539,19 @@ export class World {
 
   setQuality(value) {
     this.settings.quality = value;
-    const low = value === "low" || (value === "auto" && innerWidth < 760);
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, low ? 1 : 1.5));
-    this.renderer.shadowMap.enabled = !low;
-    if (this.sun) this.sun.castShadow = !low;
+    this.quality = resolveQuality(value, innerWidth, this.softwareRenderer);
+    const profile = QUALITY_PROFILES[this.quality];
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.pixelRatio));
+    this.renderer.shadowMap.enabled = profile.shadows;
+    if (this.sun) {
+      this.sun.castShadow = profile.shadows;
+      if (profile.shadows && this.sun.shadow.mapSize.x !== profile.shadowMap) {
+        this.sun.shadow.mapSize.set(profile.shadowMap, profile.shadowMap);
+        this.sun.shadow.map?.dispose();
+        this.sun.shadow.map = null;
+      }
+    }
+    this.pipeline.configure(this.quality);
     this.resize();
   }
 
@@ -491,12 +561,21 @@ export class World {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
+    this.pipeline.setSize(width, height);
   }
+
+  shake(amount) { if (!this.settings.reducedMotion) this.shakeState.add(amount); }
 
   update(dt, focus, reducedMotion = false) {
     this.clock += dt;
+    // Remove last frame's shake before the camera follows its target, so shaking never accumulates.
+    this.camera.position.sub(this.shakeOffset);
+    this.particles.update(dt);
     this.water.position.y = -0.55 + Math.sin(this.clock * 0.7) * 0.06;
-    if (!reducedMotion) this.surfaces.water.normalMap.offset.set(this.clock * .007, this.clock * .003);
+    if (!reducedMotion) {
+      this.surfaces.water.normalMap.offset.set(this.clock * .007, this.clock * .003);
+      this.journeyWater?.offset.set(this.clock * .02, this.clock * .011);
+    }
     if (this.foam) this.foam.scale.setScalar(1 + Math.sin(this.clock * 0.65) * 0.012);
     this.water.material.color.setHSL(0.55 + Math.sin(this.clock * 0.15) * 0.012, 0.73, 0.42);
     if (this.beamPivot) this.beamPivot.rotation.y += dt * 0.22;
@@ -514,18 +593,26 @@ export class World {
         if (amount >= 1) { object.removeFromParent(); this.effects.splice(index, 1); this.effectPool.push(object); }
     }
     const bolt = this.journeyCompanion || this.bolt;
-    if (bolt && focus && this.friendAwake) {
+    // BOLT joins the journey from its first page; on the island it waits until its dock is repaired.
+    if (bolt && focus && (this.friendAwake || bolt === this.journeyCompanion)) {
       const d = Math.hypot(focus.x - bolt.position.x, focus.z - bolt.position.z);
       if (d > 2.8) {
         bolt.rotation.y = Math.atan2(focus.x - bolt.position.x, focus.z - bolt.position.z);
         bolt.position.x += (focus.x - bolt.position.x) / d * Math.min(d - 2.8, dt * 4.2);
         bolt.position.z += (focus.z - bolt.position.z) / d * Math.min(d - 2.8, dt * 4.2);
+        const walker = { x: bolt.position.x, z: bolt.position.z, radius: .6 };
+        this.constrainPlayer(walker);
+        bolt.position.x = walker.x; bolt.position.z = walker.z;
         bolt.position.y = 0.55 + Math.abs(Math.sin(this.clock * 9)) * 0.06;
       }
       this.animateActor(bolt, this.clock, d > 2.8);
     } else if (bolt && !focus) bolt.position.lerp(new THREE.Vector3(-3, 0.55, -4), 1 - Math.exp(-dt * 2));
     if (this.journeyParticles && !reducedMotion) this.journeyParticles.position.y = Math.sin(this.clock*.3)*.25;
-    if (this.journeyPlanet && !reducedMotion) this.journeyPlanet.rotation.y += dt*.015;
+    if (this.journeyPlanet && !reducedMotion) {
+      this.journeyPlanet.rotation.y += dt * .01;
+      if (this.journeyPlanet.userData.clouds) this.journeyPlanet.userData.clouds.rotation.y += dt * .006;
+    }
+    if (this.journeyRays && !reducedMotion) for (const shaft of this.journeyRays.children) shaft.rotation.z = .12 + Math.sin(this.clock * .25 + shaft.userData.phase) * .09;
     if (this.celebration) {
       const c = this.celebration;
       c.age = Math.min(VICTORY_DURATION, c.age + dt);
@@ -561,6 +648,34 @@ export class World {
       this.cameraTarget.lerp(this.desiredTarget.set(0, 1, -1), 1 - Math.exp(-dt * 1.8));
       this.camera.lookAt(this.cameraTarget);
     }
-    this.renderer.render(this.scene, this.camera);
+    this.shakeOffset.copy(this.shakeState.update(dt, reducedMotion));
+    this.camera.position.add(this.shakeOffset);
+    this.followLight(reducedMotion, dt);
+    this.sky.follow(this.camera);
+    const height = this.renderer.getDrawingBufferSize(this.drawingSize).y;
+    this.particles.material.uniforms.scale.value = height / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
+    this.refreshEnvironmentMap();
+    this.pipeline.render();
+  }
+
+  followLight(reducedMotion, dt) {
+    // Snap the shadow frustum to whole texels so shadows do not shimmer while the camera glides.
+    const size = this.sun.shadow.camera.right - this.sun.shadow.camera.left;
+    const texel = size / Math.max(1, this.sun.shadow.mapSize.x);
+    const forward = this.sunOffset.clone().normalize();
+    const right = new THREE.Vector3(0, 1, 0).cross(forward).normalize();
+    const up = forward.clone().cross(right);
+    const focus = this.cameraTarget;
+    const r = Math.round(focus.dot(right) / texel) * texel, u = Math.round(focus.dot(up) / texel) * texel;
+    this.shadowFocus.copy(right).multiplyScalar(r).addScaledVector(up, u).addScaledVector(forward, focus.dot(forward));
+    this.sun.target.position.copy(this.shadowFocus);
+    this.sun.position.copy(this.shadowFocus).add(this.sunOffset);
+    if (this.atmosphere?.storm && !reducedMotion) {
+      this.flashTimer = (this.flashTimer ?? 3) - dt;
+      if (this.flashTimer <= 0) { this.flash = 1; this.flashTimer = 4 + Math.random() * 6; }
+    }
+    this.flash = Math.max(0, (this.flash || 0) - dt * 3.2);
+    this.sky.uniforms.flash.value = this.flash * .55;
+    this.hemi.intensity = (this.atmosphere?.hemi ?? .5) + this.flash * 1.4;
   }
 }

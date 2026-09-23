@@ -19,7 +19,7 @@ const server = process.env.GAME_URL ? null : spawn(process.execPath, ["node_modu
 if (server) await new Promise((resolve, reject) => {
   const timeout = setTimeout(() => reject(new Error("Vite did not start")), 12_000);
   server.stdout.on("data", chunk => {
-    if (String(chunk).includes(`http://127.0.0.1:${PORT}`)) { clearTimeout(timeout); resolve(); }
+    if (String(chunk).replace(/\x1b\[[0-9;]*m/g, "").includes(`http://127.0.0.1:${PORT}`)) { clearTimeout(timeout); resolve(); }
   });
   server.once("exit", code => reject(new Error(`Vite exited early (${code})`)));
 });
