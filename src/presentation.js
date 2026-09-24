@@ -1,3 +1,6 @@
+// Radius of the walkable play space in every scene. Blender scenery is authored around it too.
+export const PLAY_RADIUS = 21;
+
 // Visual proportions only: objective distances, timers and pickup ranges stay unchanged.
 export const MODEL_SCALE = Object.freeze({
   kai: 0.82, bolt: 0.78, rust_scout: 0.9, zombie_dog: 0.86, rust_drone: 0.82,

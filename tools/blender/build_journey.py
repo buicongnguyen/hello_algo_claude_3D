@@ -8,7 +8,9 @@ walkable; terrain, architecture and set dressing rise beyond it. Objective point
 read from src/journey-data.js, so no solid prop can ever cover a target, and every solid prop that
 reaches the play space exports a collision footprint in journey-manifest.json.
 """
+import functools
 import hashlib
+import inspect
 import json
 import math
 import re
@@ -29,6 +31,39 @@ OUT.mkdir(parents=True, exist_ok=True)
 SOURCE.mkdir(parents=True, exist_ok=True)
 G = P.GROUND_Y
 c = srgb
+# The runtime owns the play radius; scenery is authored around the old 18.5 m edge and moved out to it.
+PLAY_RADIUS = float(re.search(r"export const PLAY_RADIUS = ([\d.]+);", (ROOT / "src" / "presentation.js").read_text(encoding="utf8")).group(1))
+
+
+def anchored(fn):
+    """Each prop moves as one rigid piece, anchored at its own position (or midpoint for line props)."""
+    names = list(inspect.signature(fn).parameters)[2:6]
+
+    def wrapper(s, M, *args, **kwargs):
+        if fn.__name__ == "road":
+            # Streets run through the centre and must stay continuous with it.
+            with s.anchor(0, 0, fixed=True):
+                return fn(s, M, *args, **kwargs)
+        if names[:2] == ["x", "z"]:
+            x, z = args[0], args[1]
+        elif names[:3] == ["x", "y", "z"]:
+            x, z = args[0], args[2]
+        elif names[:2] == ["a", "b"]:
+            a, b = args[0], args[1]
+            k = 2 if len(a) == 3 else 1
+            x, z = (a[0] + b[0]) / 2, (a[k] + b[k]) / 2
+        elif names[:4] == ["x0", "z0", "x1", "z1"]:
+            x, z = args[0], args[1]
+        else:
+            return fn(s, M, *args, **kwargs)
+        with s.anchor(x, z):
+            return fn(s, M, *args, **kwargs)
+    return functools.wraps(fn)(wrapper)
+
+
+for _name, _fn in inspect.getmembers(P, inspect.isfunction):
+    if _fn.__module__ == P.__name__ and _name not in ("materials", "c", "noise_offset", "solid_box"):
+        setattr(P, _name, anchored(_fn))
 
 # ---- gameplay keep-clear data --------------------------------------------------------------------
 
@@ -76,7 +111,7 @@ def keep_clear(scene_key):
         clear += [("point", (p, 3.0)) for p in [(0, -11), (-6, -3), (6, -3), (0, -3), (-7, -3), (7, -3)]]
         chains += [[(x, 14), (0, -11)] for x in (-7, -6, 0, 6, 7)]
     if kind == "boss":
-        clear.append(("point", ((0, 0), 18.5)))
+        clear.append(("point", ((0, 0), PLAY_RADIUS)))
     for chain in chains:
         for a, b in zip(chain, chain[1:]):
             clear.append(("segment", (a, b, 2.2)))
@@ -194,6 +229,7 @@ def city(s, M, home=False):
 
 def festival(s, M):
     # Meridian Museum: a classical facade, lanterns and stalls for the homecoming at dusk.
+    s.hold(0, -24)
     P.steps(s, M, 0, -19.5, 18, 3, .7, .3)
     s.emit(bm_box(18, 7.2, 8, .1), M["plaster"], at(0, G + 3.6 + .9, -26), color=c(0xe9e1d2), ao=.7, ao_height=4)
     s.emit(bm_box(19, .6, 9, .05), M["stone"], at(0, G + .3, -26), color=c(0xcfc6b6), ao=.8)
@@ -205,11 +241,12 @@ def festival(s, M):
     s.solid(0, -26, 9.5, force=True)
     for x in (-8, -4, 4, 8):
         P.banner(s, M, x, -18.6, 5.2, (0x5b7cff, 0xff5f8a, 0x3fc7a0, 0xffb347)[int(x + 8) % 4])
-    for x in (-16, -12, 12, 16):
-        P.stall(s, M, x, -11 if abs(x) < 14 else -4, math.pi / 2 if x < 0 else -math.pi / 2, (0xff7a8a, 0x7fb6ff, 0xffc75f, 0x8fe3a8)[int(x + 16) % 4])
     for i in range(7):
         x = -15 + i * 5
         P.string_lights(s, M, (x, G + 5.2, -17), (x + 5, G + 5.2, -17), .7)
+    s.release()
+    for x in (-16, -12, 12, 16):
+        P.stall(s, M, x, -11 if abs(x) < 14 else -4, math.pi / 2 if x < 0 else -math.pi / 2, (0xff7a8a, 0x7fb6ff, 0xffc75f, 0x8fe3a8)[int(x + 16) % 4])
     for z in (-14, -6, 2):
         P.string_lights(s, M, (-17, G + 4.6, z), (-9, G + 4.2, z + 3), .6, 8)
         P.string_lights(s, M, (9, G + 4.2, z + 3), (17, G + 4.6, z), .6, 8)
@@ -253,8 +290,10 @@ def countryside(s, M):
     for x, z, yaw in ((-18, 14, .3), (-19, 10, 1.2), (18, -16, .5), (24, 16, 2)):
         P.hay_bale(s, M, x, z, yaw)
     # A small wind-powered transmitter mast is the destination the beam is feeding.
+    s.hold(21, -8)
     P.mast(s, M, 21, -8, 9, glow="cyan")
     s.emit(bm_box(2.2, 1.6, 1.6, .05), M["paint"], at(21, G + .8, -5.8), color=c(0xe8e2d6), ao=.6)
+    s.release()
     P.windmill(s, M, 24, -4, 4.5, -math.pi / 2)
     scatter(s, (4, 19), 70, lambda x, z: P.grass(s, M, x, z, 6, .45, 0x6f9a40))
     scatter(s, (19, 34), 90, lambda x, z: P.grass(s, M, x, z, 7, .6, 0x5f8a3c))
@@ -310,6 +349,7 @@ def coast(s, M):
     for x, z, size in ((-13, 1, 1.0), (15, -12, .8), (-6, 16, .7)):
         if not s.solid(x, z, 1.1 * size):
             continue
+        s.hold(x, z)
         s.emit(bm_cylinder(1.1 * size, .5 * size, 10, top=.95 * size), M["ground"], at(x, G + .25 * size, z), color=c(0xd9b478), ao=.7)
         for k in range(4):
             a = k / 4 * math.tau + .4
@@ -318,6 +358,7 @@ def coast(s, M):
         s.emit(bm_cylinder(.45 * size, 1.2 * size, 8, top=.35 * size), M["ground"], at(x, G + 1.1 * size, z), color=c(0xe8c690), ao=.85)
         s.emit(bm_box(.02, .5 * size, .3 * size), M["cloth"], at(x, G + 2.0 * size, z + .15), color=c(0xff5f5f), ao=1)
         s.emit(bm_cylinder(.02, .8 * size, 4), M["wood"], at(x, G + 1.9 * size, z), color=c(0x8a6040))
+        s.release()
     for i in range(34):
         t = i / 33
         px, pz = -17 + t * 30 + math.sin(t * 5) * 2, 12 - t * 26
@@ -391,6 +432,7 @@ def wreck(s, M):
     terrain(s, M["ground"], hills(4, 21, 34, .05, 9), silt)
     wood, dark = 0x6b5038, 0x4a3828
     # The Pelican rests on its side across the north: ribs, keel, planking and a broken bow.
+    s.hold(0, -24)
     keel = [Vector((-26, G + .6, -22.5)), Vector((-8, G + .4, -24.5)), Vector((10, G + .5, -25)), Vector((24, G + 1.2, -23))]
     s.emit(bm_tube(keel, .5, 6), M["wood"], color=c(dark), ao=.6, smooth=True)
     for i in range(12):
@@ -411,6 +453,7 @@ def wreck(s, M):
     for i in range(5):
         s.emit(bm_torus(.45, .08, 12, 5), M["metal"], at(-18 + i * 7, G + 3.2, -22.1, 0, 1, 1, 1, math.pi / 2), color=c(0x9a8a5a))
         s.emit(bm_cylinder(.38, .08, 12), M["cyan" if i % 2 else "glass"], at(-18 + i * 7, G + 3.2, -22.0, 0, 1, 1, 1, math.pi / 2), color=(1, 1, 1))
+    s.release()
     # A snapped-off section of deck and a toppled crane lie in the survey field.
     for x, z, yaw in ((-15, -4, .5), (14, 9, -.7)):
         if P.solid_box(s, x, z, 4.5, 2.4, yaw):
@@ -428,10 +471,12 @@ def wreck(s, M):
         P.crate(s, M, x, z, s.random.uniform(.9, 1.4), 0x7a6a4a)
     for x, z in ((-19, -15), (18, -16), (-23, 4), (23, 6)):
         P.barrel(s, M, x, z, 0x6a5a3a, tipped=s.random.random() < .5)
+    s.hold(27, -13)
     s.emit(bm_torus(1.4, .22, 20, 6), M["metal"], at(27, G + 1.2, -13, .6, 1, 1, 1, math.pi / 2), color=c(0x5c5a52), ao=.7)
     s.emit(bm_box(.35, 3.2, .35), M["metal"], at(27, G + 1.8, -13, .6), color=c(0x5c5a52), ao=.7)
     chain = [Vector((27, G + .2, -13)) + Vector((-i * .9, .1 * math.sin(i), i * .5)) for i in range(12)]
     s.emit(bm_tube(chain, .1, 4), M["metal"], color=c(0x4f4d46), ao=.8)
+    s.release()
     for i in range(18):
         a = s.random.uniform(0, math.tau)
         r = s.random.uniform(21, 32)
@@ -492,21 +537,28 @@ def platform(s, M):
     seabed = ground_colors(0x1f4a5c, 0x28566a, 0x173a48, .05, 61)
     terrain(s, M["ground"], lambda x, z, r: 0.0, seabed, flat_height=-6)
     water_plane(s, M, .02, 260)
-    octagon = [(math.cos(i / 8 * math.tau + math.pi / 8) * 21.5, math.sin(i / 8 * math.tau + math.pi / 8) * 21.5) for i in range(8)]
-    s.emit(bm_prism(octagon, 1.2, .1), M["metal"], at(0, G - 1.2, 0), color=c(0x7d8a92), ao=.9)
+    edge = s.play_radius
+    s.hold(0, 0, fixed=True)
+    deck = [(math.cos(i / 32 * math.tau) * (edge + 4.2), math.sin(i / 32 * math.tau) * (edge + 4.2)) for i in range(32)]
+    s.emit(bm_prism(deck, 1.2, .1), M["metal"], at(0, G - 1.2, 0), color=c(0x7d8a92), ao=.9)
     # Deck plating, seams and hazard stripes.
-    for i in range(-20, 21, 4):
-        s.emit(bm_box(.06, .03, 40), M["dark"], at(i, G + .01, 0), color=c(0x3a4148), ao=1)
-        s.emit(bm_box(40, .03, .06), M["dark"], at(0, G + .01, i), color=c(0x3a4148), ao=1)
-    for k in range(24):
-        a = k / 24 * math.tau
-        s.emit(bm_box(1.2, .03, .5), M["paint"], at(math.cos(a) * 19.6, G + .02, math.sin(a) * 19.6, -a), color=c(0xffc84a if k % 2 else 0x2a2f36), ao=1)
+    for i in range(-28, 29, 4):
+        half = math.sqrt(max(0.0, (edge + 3.8) ** 2 - i * i))
+        if half < 1:
+            continue
+        s.emit(bm_box(.06, .03, half * 2), M["dark"], at(i, G + .01, 0), color=c(0x3a4148), ao=1)
+        s.emit(bm_box(half * 2, .03, .06), M["dark"], at(0, G + .01, i), color=c(0x3a4148), ao=1)
+    for k in range(28):
+        a = k / 28 * math.tau
+        s.emit(bm_box(1.2, .03, .5), M["paint"], at(math.cos(a) * (edge + 1.2), G + .02, math.sin(a) * (edge + 1.2), -a), color=c(0xffc84a if k % 2 else 0x2a2f36), ao=1)
     s.emit(bm_torus(5.5, .12, 40, 4), M["paint"], at(0, G + .02, 3, 0, 1, .1, 1), color=c(0xf4efe6), ao=1)
     for dx, dz, w, d in ((-1.3, 0, .6, 4.5), (1.3, 0, .6, 4.5), (0, 0, 2.0, .6)):
         s.emit(bm_box(w, .03, d), M["paint"], at(dx, G + .025, 3 + dz), color=c(0xf4efe6), ao=1)
-    for i in range(16):
-        a0, a1 = i / 16 * math.tau, (i + 1) / 16 * math.tau
-        P.railing(s, M, (math.cos(a0) * 20.8, math.sin(a0) * 20.8), (math.cos(a1) * 20.8, math.sin(a1) * 20.8), 1.1, 0xe0b340)
+    for i in range(24):
+        a0, a1 = i / 24 * math.tau, (i + 1) / 24 * math.tau
+        rail = edge + 3.7
+        P.railing(s, M, (math.cos(a0) * rail, math.sin(a0) * rail), (math.cos(a1) * rail, math.sin(a1) * rail), 1.1, 0xe0b340)
+    s.release()
     for i in range(8):
         a = i / 8 * math.tau + math.pi / 8
         x, z = math.cos(a) * 19, math.sin(a) * 19
@@ -519,8 +571,12 @@ def platform(s, M):
     P.dish(s, M, 13, -26, 3.2, 3.8, -.5, .7)
     P.mast(s, M, 0, -27, 11, glow="red")
     s.emit(bm_box(5, .8, 5), M["metal"], at(0, G - .4, -27), color=c(0x6d7880), ao=.9)
-    for x, z, yaw, tone, stack in ((-17, 6, math.pi / 2, 0x2f7fb8, 1), (17, -6, math.pi / 2, 0xd8573f, 0), (17, 8, math.pi / 2, 0xe0b340, 1), (-17, -8, math.pi / 2, 0x4a9a6a, 0)):
-        P.container(s, M, x, z, yaw, tone, stacked=stack)
+    # Cargo sits outside the fence, tangent to it, and never on the camera side of the deck.
+    with s.anchor(0, 0, fixed=True):
+        for angle, tone, stack in ((165, 0x2f7fb8, 1), (200, 0x4a9a6a, 0), (295, 0xe0b340, 1), (325, 0xd8573f, 0)):
+            a = math.radians(angle)
+            x, z = math.cos(a) * (s.play_radius + 2.1), math.sin(a) * (s.play_radius + 2.1)
+            P.container(s, M, x, z, math.atan2(-math.cos(a), -math.sin(a)), tone, stacked=stack)
     for x, z in ((-8, -18), (8, -18), (-19, -1), (19, 1)):
         P.barrel(s, M, x, z, 0x2f7fb8)
     for x, z in ((-15, -15), (15, -15)):
@@ -559,18 +615,22 @@ def atolls(s, M):
             a = s.random.uniform(0, math.tau)
             P.rock(s, M, ix + math.cos(a) * radius * .62, iz + math.sin(a) * radius * .62, s.random.uniform(.6, 1.2), 0x9a8a72, y=.3)
     # A stilted research hut and navigation lighthouse on the larger islands.
+    s.hold(-30, -14)
     hut = at(-30, 1.6, -14, .5)
     for lx in (-1.4, 1.4):
         for lz in (-1.2, 1.2):
             s.emit(bm_box(.2, 2.4, .2), M["wood"], hut @ at(lx, 0, lz), color=c(0x6b4630))
     s.emit(bm_box(3.4, 2.0, 3.0, .04), M["wood"], hut @ at(0, 2.2, 0), color=c(0xd8c2a0), ao=.8)
     s.emit(bm_prism([(-2.2, 0), (2.2, 0), (0, 1.4)], 3.6), M["cloth"], hut @ at(0, 3.2, 1.8, 0, 1, 1, 1, -math.pi / 2), color=c(0x5f8a5a), ao=1)
+    s.release()
+    s.hold(26, -28)
     tower = at(26, 1.6, -28)
     s.emit(bm_cylinder(1.3, 9, 16, top=.9), M["plaster"], tower @ at(0, 4.5, 0), color=c(0xf4efe6), ao=.7, smooth=True)
     for h in (2.5, 5.5):
         s.emit(bm_cylinder(1.28 - h * .045, 1.2, 16), M["paint"], tower @ at(0, h, 0), color=c(0xd8473a), smooth=True)
     s.emit(bm_cylinder(1.1, 1.2, 12), M["warm"], tower @ at(0, 9.6, 0), color=(1, 1, 1))
     s.emit(bm_cylinder(1.3, .8, 12, top=.2), M["paint"], tower @ at(0, 10.6, 0), color=c(0xd8473a), smooth=True)
+    s.release()
     for x, z, tone in ((-16, -18, 0xffb347), (16, 17, 0xff6f61), (-19, 12, 0xffb347), (20, -4, 0xff6f61)):
         if not s.solid(x, z, .6):
             continue
@@ -622,11 +682,13 @@ def sky(s, M, storm=False):
         if not low:
             s.emit(bm_cylinder(.35, 2.4, 6, top=0), M["cyan" if storm else "warm"], at(x, 1.2, z, a), color=(1, 1, 1))
     if not storm:
+        s.hold(0, -46)
         s.emit(bm_torus(7, .35, 48, 8), M["white"], at(0, 8, -46, 0, 1, 1, 1, math.pi / 2), color=(1, 1, 1))
         s.emit(bm_torus(7.8, .18, 48, 6), M["metal"], at(0, 8, -46, 0, 1, 1, 1, math.pi / 2), color=c(0xd9a93a))
         for x in (-10, 10):
             s.emit(bm_cylinder(.35, 14, 8), M["metal"], at(x, 3, -46), color=c(0xd9a93a), smooth=True)
             s.emit(bm_sphere(.6, 1), M["warm"], at(x, 10.4, -46), color=(1, 1, 1))
+        s.release()
         for i in range(6):
             a = -math.pi / 2 + (i - 2.5) * .45
             x, z = math.cos(a) * 30, math.sin(a) * 30
@@ -642,8 +704,10 @@ def bm_lathe_buoy():
 
 def orbit(s, M):
     # A circular docking apron: KAI hovers over a real surface with the Earth below the rim.
-    s.emit(bm_cylinder(21.5, .8, 48), M["paint"], at(0, G - .4, 0), color=c(0xaab4bd), ao=1)
-    s.emit(bm_cylinder(19.2, .03, 48), M["paint"], at(0, G + .01, 0), color=c(0x7d8894), ao=1)
+    edge = s.play_radius
+    s.hold(0, 0, fixed=True)
+    s.emit(bm_cylinder(edge + 3, .8, 64), M["paint"], at(0, G - .4, 0), color=c(0xaab4bd), ao=1)
+    s.emit(bm_cylinder(edge + .9, .03, 64), M["paint"], at(0, G + .01, 0), color=c(0x7d8894), ao=1)
     for ring in range(4):
         for i in range(12 + ring * 6):
             a = (i + ring * .5) / (12 + ring * 6) * math.tau
@@ -652,15 +716,17 @@ def orbit(s, M):
     for i in range(12):
         a = i / 12 * math.tau
         s.emit(bm_box(.08, .04, 19), M["dark"], at(math.cos(a) * 9.6, G + .035, math.sin(a) * 9.6, math.pi / 2 - a), color=c(0x3a4250), ao=1)
-    for radius in (6, 12, 18.8):
+    for radius in (6, 12, edge + 1.6):
         s.emit(bm_torus(radius, .07, 64, 4), M["paint"], at(0, G + .03, 0, 0, 1, .25, 1), color=c(0xd9e2ea), ao=1)
-    for i in range(32):
-        a = i / 32 * math.tau
-        s.emit(bm_box(.9, .03, .22), M["paint"], at(math.cos(a) * 20.3, G + .02, math.sin(a) * 20.3, math.pi / 2 - a), color=c(0xffc84a if i % 2 else 0x2a2f36), ao=1)
+    for i in range(36):
+        a = i / 36 * math.tau
+        s.emit(bm_box(.9, .03, .22), M["paint"], at(math.cos(a) * (edge + 2.2), G + .02, math.sin(a) * (edge + 2.2), math.pi / 2 - a), color=c(0xffc84a if i % 2 else 0x2a2f36), ao=1)
     for i in range(16):
         a = i / 16 * math.tau
-        s.emit(bm_box(.22, .12, .22), M["cyan" if i % 4 else "red"], at(math.cos(a) * 21.2, G + .06, math.sin(a) * 21.2), color=(1, 1, 1))
-    s.emit(bm_cylinder(21, 6, 48, top=12), M["metal"], at(0, G - 3.8, 0), color=c(0x6a7480), ao=.7, smooth=True)
+        s.emit(bm_box(.22, .12, .22), M["cyan" if i % 4 else "red"], at(math.cos(a) * (edge + 2.75), G + .06, math.sin(a) * (edge + 2.75)), color=(1, 1, 1))
+    s.emit(bm_cylinder(edge + 2.6, 6, 64, top=12), M["metal"], at(0, G - 3.8, 0), color=c(0x6a7480), ao=.7, smooth=True)
+    s.release()
+    s.hold(0, -40)
     # The station proper: hub, docking ring, modules, truss spars and solar wings.
     s.emit(bm_torus(14, 1.1, 64, 12), M["plaster"], at(0, 12, -42, 0, 1, 1, 1, math.pi / 2), color=c(0xeceae4), ao=.85, smooth=True)
     s.emit(bm_torus(14, .25, 64, 6), M["cyan"], at(0, 12, -40.9, 0, 1, 1, 1, math.pi / 2), color=(1, 1, 1))
@@ -676,14 +742,19 @@ def orbit(s, M):
         for k in range(3):
             P.solar_panel(s, M, side * (14 + k * 7), 12, -32.5, 6.2, 5, 0, .15 * side)
             P.solar_panel(s, M, side * (14 + k * 7), 12, -35.8, 6.2, 5, 0, -.15 * side)
+    s.release()
+    sx, sz = s.push(0, -40)
+    s.hold(0, 0, fixed=True)
     for side in (-1, 1):
-        P.truss(s, M, (side * 21.5, G - .4, 0), (side * 30, 6, -22), .8)
-    # Small parked shuttles on the apron rim.
-    for x, z, yaw in ((-24, -8, .8), (25, -12, -.9)):
-        b = at(x, G + .6, z, yaw)
+        P.truss(s, M, (side * (edge + 2.8), G - .4, 0), (side * 30 + sx, 6, -22 + sz), .8)
+    # Small parked shuttles on the apron rim, beyond the play boundary and parallel to it.
+    for angle in (math.atan2(-8, -24), math.atan2(-12, 25)):
+        x, z = math.cos(angle) * (edge + 1.7), math.sin(angle) * (edge + 1.7)
+        b = at(x, G + .6, z, math.atan2(-math.sin(angle), math.cos(angle)))
         s.emit(bm_uv_sphere(1.4, 16, 8), M["plaster"], b @ at(0, 0, 0, 0, 1, .7, 2.1), color=c(0xf4f2ec), ao=.8, smooth=True)
         s.emit(bm_box(4.4, .12, 1.4), M["paint"], b @ at(0, -.2, .6), color=c(0x3f7fd8))
         s.emit(bm_box(1.2, .5, .9), M["glass"], b @ at(0, .55, -1.6), color=c(0xb6c8d6))
+    s.release()
 
 
 # ---- 12-14 moon ------------------------------------------------------------------------------------
@@ -723,6 +794,7 @@ def lunar(s, M, kind):
     scatter(s, (5, 19), 26, lambda x, z: P.rock(s, M, x, z, s.random.uniform(.15, .35), 0x9a9894, collide=False))
     gold, foil = 0xd9a93a, 0xc9b27a
     if kind == "moonplain":
+        s.hold(-16, -26)
         lander = at(-16, G, -26, .3)
         octagon = [(math.cos(i / 8 * math.tau + math.pi / 8) * 2.2, math.sin(i / 8 * math.tau + math.pi / 8) * 2.2) for i in range(8)]
         s.emit(bm_prism(octagon, 1.8, .06), M["foil"], lander @ at(0, 1.9, 0), color=c(gold), ao=.8)
@@ -744,10 +816,13 @@ def lunar(s, M, kind):
             s.emit(bm_tube([hip, foot], .12, 6), M["metal"], color=c(0xb9bec2))
             s.emit(bm_cylinder(.5, .12, 10), M["metal"], at(foot.x, G + .06, foot.z), color=c(0xb9bec2))
         s.solid(-16, -26, 4.2)
+        s.release()
         for i in range(8):
             s.emit(bm_box(.6, .06, .25), M["ground"], at(-12 + i * 1.1, G + .015, -18 + i * .9, .7), color=c(0x7f7d7a), ao=1)
-        s.emit(bm_cylinder(.05, 3.2, 5), M["metal"], at(-9, G + 1.6, -22), color=c(0xe8e6e0))
-        s.emit(bm_box(1.8, 1.1, .03), M["cloth"], at(-8.1, G + 2.6, -22), color=c(0x3f7fd8), ao=1)
+        with s.anchor(-9, -22):
+            s.emit(bm_cylinder(.05, 3.2, 5), M["metal"], at(-9, G + 1.6, -22), color=c(0xe8e6e0))
+            s.emit(bm_box(1.8, 1.1, .03), M["cloth"], at(-8.1, G + 2.6, -22), color=c(0x3f7fd8), ao=1)
+        s.hold(14, -24)
         rover = at(14, G, -24, -.4)
         if s.solid(14, -24, 2.2):
             s.emit(bm_box(3.2, .3, 1.9, .05), M["metal"], rover @ at(0, .9, 0), color=c(0xb9bec2))
@@ -756,18 +831,25 @@ def lunar(s, M, kind):
                     s.emit(bm_cylinder(.45, .3, 12), M["dark"], rover @ at(wx, .45, wz, 0, 1, 1, 1, math.pi / 2), color=c(0x5a5d62), smooth=True)
             s.emit(bm_box(.8, .1, .8), M["glass"], rover @ at(-.8, 1.3, 0), color=c(0x3b5cc4))
             P.dish(s, M, 14.6, -24.4, .6, 1.8, 0, .8)
+        s.release()
     elif kind == "crater":
         for x, z, yaw in ((-22, -12, .4), (22, -10, -.4), (-18, 18, 2.4)):
+            s.hold(x, z)
             if not P.solid_box(s, x, z, 5, 4, yaw):
+                s.release()
                 continue
             hut = at(x, G, z, yaw)
             s.emit(bm_cylinder(2.2, 5, 16), M["plaster"], hut @ at(0, 1.6, 0, 0, 1, 1, 1, math.pi / 2), color=c(0xe8e6e0), ao=.7, smooth=True)
             s.emit(bm_box(1.2, 1.8, .2), M["glass"], hut @ at(0, 1.4, 2.5), color=c(0xb6c8d6))
             s.emit(bm_box(1.3, .3, .3), M["warm"], hut @ at(0, 2.6, 2.5), color=(1, 1, 1))
+            s.release()
         for x, z in ((-26, -24), (26, -26)):
+            s.hold(x, z)
             P.mast(s, M, x, z, 12, glow="warm")
             s.emit(bm_box(.4, .4, 10), M["metal"], at(x, G + 12, z + 5 * (1 if x < 0 else 1)), color=c(0xd9a93a))
             s.emit(bm_box(1.4, .8, 1.0), M["warm"], at(x, G + 11.2, z + 9.5), color=(1, 1, 1))
+            s.release()
+        s.hold(0, -19)
         rail = [Vector((-30 + i * 3, G + .08, -18 - math.sin(i * .5) * 2)) for i in range(21)]
         s.emit(bm_tube(rail, .08, 4), M["metal"], color=c(0x8a8f96))
         s.emit(bm_tube([p + Vector((0, 0, 1.2)) for p in rail], .08, 4), M["metal"], color=c(0x8a8f96))
@@ -776,27 +858,31 @@ def lunar(s, M, kind):
             if s.solid(p.x, p.z + .6, 1.1):
                 s.emit(bm_box(1.8, 1.0, 1.4, .08), M["paint"], at(p.x, G + .8, p.z + .6), color=c(0xd9a93a), ao=.8)
                 s.emit(bm_box(1.5, .5, 1.1), M["stone"], at(p.x, G + 1.45, p.z + .6), color=c(0x7a7876))
+        s.release()
         for x, z in ((-12, -22), (12, -23), (0, -30)):
             P.crate(s, M, x, z, 1.2, 0xb9bec2)
-        s.emit(bm_cylinder(1.4, 8, 12, top=.5), M["metal"], at(4, G + 4, -34), color=c(0xd9a93a), ao=.7)
-        s.emit(bm_box(4, 2, 4, .05), M["metal"], at(4, G + 1, -34), color=c(0x8a8f96), ao=.7)
+        with s.anchor(4, -34):
+            s.emit(bm_cylinder(1.4, 8, 12, top=.5), M["metal"], at(4, G + 4, -34), color=c(0xd9a93a), ao=.7)
+            s.emit(bm_box(4, 2, 4, .05), M["metal"], at(4, G + 1, -34), color=c(0x8a8f96), ao=.7)
     else:
+        s.hold(15, -27)
         obs = at(15, G, -27)
         s.solid(15, -27, 6.4, force=True)
         s.emit(bm_cylinder(6.2, 4.2, 28), M["plaster"], obs @ at(0, 2.1, 0), color=c(0xe8e6e0), ao=.65, smooth=True)
         s.emit(bm_uv_sphere(6.0, 28, 12), M["metal"], obs @ at(0, 4.2, 0, .6, 1, .9, 1), color=c(0xd9dde0), ao=.9, smooth=True)
         s.emit(bm_box(1.8, 5.6, 12.4), M["glass"], obs @ at(0, 6.5, 0, .6, 1, 1, 1, 0, .1), color=c(0x0b1320))
         s.emit(bm_cylinder(.9, 9, 12), M["metal"], obs @ at(1.5, 7, 1.5, 0, 1, 1, 1, -.6), color=c(0x3b4450))
+        s.release()
         P.dish(s, M, -16, -26, 5, 5, .5, .8)
         for k in range(4):
-            P.solar_panel(s, M, -30 + k * 5.5, G + 1.4, -12, 4.8, 3, 0, .45)
-            s.emit(bm_box(.15, 1.4, .15), M["metal"], at(-30 + k * 5.5, G + .7, -12), color=c(0x9aa2a8))
-        s.solid(-22, -12, 2.2)
-        s.solid(-27, -12, 2.2)
-        P.module(s, M, 24, G + 1.6, -8, 8, 1.6, math.pi / 2, math.pi / 2)
-        s.solid(24, -8, 2.0)
-        s.solid(24, -12, 2.0)
-        s.solid(24, -4, 2.0)
+            with s.anchor(-30 + k * 5.5, -22):
+                P.solar_panel(s, M, -30 + k * 5.5, G + 1.4, -22, 4.8, 3, 0, .45)
+                s.emit(bm_box(.15, 1.4, .15), M["metal"], at(-30 + k * 5.5, G + .7, -22), color=c(0x9aa2a8))
+        with s.anchor(24, -8):
+            P.module(s, M, 24, G + 1.6, -8, 8, 1.6, math.pi / 2, math.pi / 2)
+            s.solid(24, -8, 2.0)
+            s.solid(24, -12, 2.0)
+            s.solid(24, -4, 2.0)
         P.mast(s, M, -6, -30, 10, glow="cyan")
         for x, z in ((-3, -18), (3, -18)):
             P.lantern_post(s, M, x, z, 2.0, "cyan")
@@ -851,7 +937,7 @@ def main():
             if name in previous:
                 report.append(previous[name])
             continue
-        scene = Scene(key, 1000 + index * 37, keep_clear(key))
+        scene = Scene(key, 1000 + index * 37, keep_clear(key), kit.AUTHORED_EDGE if key in ("glass", "basalt") else PLAY_RADIUS)
         BUILDERS[key](scene, M)
         root = bpy.data.objects.new("Journey_" + key, None)
         bpy.context.collection.objects.link(root)

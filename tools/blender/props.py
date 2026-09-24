@@ -62,7 +62,8 @@ def pebbles(s, M, x, z, count=6, spread=1.2, tone=0x8d8479, size=.16, y=GROUND_Y
 
 
 def tree(s, M, x, z, height=5.0, canopy=0x4f8a3a, trunk=0x6b4a33, lobes=4, collide=True, y=GROUND_Y, shape="round"):
-    if collide and not s.solid(x, z, .45 * height / 5):
+    # Tall canopies between the camera and the play space would hide KAI at the edge.
+    if s.low_only(x, z, 44) or collide and not s.solid(x, z, .45 * height / 5):
         return False
     k = height / 5
     lean = Vector((s.random.uniform(-.3, .3), 0, s.random.uniform(-.3, .3)))
@@ -150,7 +151,8 @@ def solid_box(s, x, z, w, d, yaw=0.0):
         cx, cz = x + axis[0] * t * long_, z + axis[1] * t * long_
         placed.append((cx, cz, math.hypot(long_ / count / 2, short / 2) * .95))
     for cx, cz, r in placed:
-        if not s.clear_of_routes(cx, cz, r) and math.hypot(cx, cz) - r <= 20.2:
+        px, pz = s.place(cx, cz)
+        if not s.clear_of_routes(px, pz, r) and math.hypot(px, pz) - r <= s.reach:
             s.skipped += 1
             return False
     for cx, cz, r in placed:
@@ -427,7 +429,7 @@ def crop_rows(s, M, x, z, width, depth, rows=6, tone=0xc9a13f, y=GROUND_Y, plant
 # ---- coast -----------------------------------------------------------------------------------
 
 def palm(s, M, x, z, height=6.0, lean=(.6, .3), y=GROUND_Y, collide=True, frond=0x3f9a4f):
-    if collide and not s.solid(x, z, .35):
+    if s.low_only(x, z, 44) or collide and not s.solid(x, z, .35):
         return False
     points, radii = [], []
     for i in range(7):

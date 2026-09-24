@@ -7,13 +7,14 @@ and varied without texture downloads, while draw calls stay bounded by the mater
 """
 import math
 import random
+from contextlib import contextmanager
 
 import bmesh
 import bpy
 from mathutils import Matrix, Vector, noise
 
-PLAY_RADIUS = 18.5      # KAI is clamped to this radius.
-COLLIDER_REACH = 20.2   # Solid props whose footprint reaches inside this radius need a collider.
+AUTHORED_EDGE = 18.5    # Scenes are authored around this play radius...
+PUSH_START, PUSH_END = 18.6, 20.0  # ...and rim dressing beyond it moves out to the real edge.
 CAMERA_DIR = Vector((9.5, 0, 15)).normalized()  # Camera offset from KAI, in game XZ.
 
 
@@ -100,13 +101,61 @@ class Batch:
 class Scene:
     """Collects geometry and gameplay metadata for one destination."""
 
-    def __init__(self, key, seed, keep_clear=()):
+    def __init__(self, key, seed, keep_clear=(), play_radius=AUTHORED_EDGE):
         self.key = key
         self.random = random.Random(seed)
         self.batches = {}
         self.colliders = []
         self.keep_clear = list(keep_clear)
         self.skipped = 0
+        self.play_radius = play_radius
+        self.delta = max(0.0, play_radius - AUTHORED_EDGE)
+        self.reach = play_radius + 1.7  # Solid props whose footprint reaches inside this radius need a collider.
+        self._anchor = None
+        self._held = []
+
+    # ---- authored -> real radius ---------------------------------------------------------
+    def push(self, x, z):
+        """Outward offset for an authored position: zero inside the old edge, full delta beyond it."""
+        r = math.hypot(x, z)
+        if r < 1e-6 or not self.delta:
+            return 0.0, 0.0
+        d = self.delta * smoothstep(PUSH_START, PUSH_END, r)
+        return x / r * d, z / r * d
+
+    def place(self, x, z):
+        dx, dz = self._anchor if self._anchor is not None else self.push(x, z)
+        return x + dx, z + dz
+
+    def hold(self, x, z, fixed=False):
+        """Everything emitted until release() moves rigidly by one offset; the outermost hold wins."""
+        self._held.append(self._anchor)
+        if self._anchor is None:
+            self._anchor = (0.0, 0.0) if fixed else self.push(x, z)
+
+    def release(self):
+        self._anchor = self._held.pop()
+
+    @contextmanager
+    def anchor(self, x, z, fixed=False):
+        self.hold(x, z, fixed)
+        try:
+            yield
+        finally:
+            self.release()
+
+    def authored_radius(self, r):
+        """Inverse of the outward push (bisection; the mapping is monotonic)."""
+        if not self.delta:
+            return r
+        lo, hi = r - self.delta, r
+        for _ in range(28):
+            mid = (lo + hi) / 2
+            if mid + self.delta * smoothstep(PUSH_START, PUSH_END, mid) < r:
+                lo = mid
+            else:
+                hi = mid
+        return (lo + hi) / 2
 
     # ---- placement rules -------------------------------------------------------------
     def clear_of_routes(self, x, z, radius):
@@ -128,7 +177,8 @@ class Scene:
 
         Returns False (and the caller skips the prop) if it would block an objective or route.
         """
-        if math.hypot(x, z) - radius > COLLIDER_REACH:
+        x, z = self.place(x, z)
+        if math.hypot(x, z) - radius > self.reach:
             return True
         if not force and not self.clear_of_routes(x, z, radius):
             self.skipped += 1
@@ -138,6 +188,7 @@ class Scene:
 
     def low_only(self, x, z, distance=32):
         """Camera-side foreground must stay low or it hides KAI."""
+        x, z = self.place(x, z)
         r = math.hypot(x, z)
         if r < 1e-3 or r > distance:
             return False
@@ -161,6 +212,14 @@ class Scene:
         bm.verts.ensure_lookup_table()
         bm.normal_update()
         world = [matrix @ v.co for v in bm.verts]
+        if world and self.delta:
+            if self._anchor is not None:
+                dx, dz = self._anchor
+            else:
+                dx, dz = self.push(sum(p.x for p in world) / len(world), sum(p.z for p in world) / len(world))
+            if dx or dz:
+                offset = Vector((dx, 0, dz))
+                world = [p + offset for p in world]
         if base_y is None:
             base_y = min((p.y for p in world), default=0)
         start = len(batch.verts)
@@ -375,8 +434,18 @@ def between(a, b):
 
 # ---- terrain ------------------------------------------------------------------------------
 
+def camera_clearance(x, z, r):
+    """Terrain between the camera and KAI stays low, so a wider play space never hides the hero."""
+    side = (x * CAMERA_DIR.x + z * CAMERA_DIR.z) / max(r, 1e-6)
+    return 1 - .82 * smoothstep(.15, .6, side) * (1 - smoothstep(46, 60, r))
+
+
 def terrain(scene, material, height_fn, color_fn, half=60.0, step=1.5, flat_radius=20.5, flat_height=0.42):
-    """A square grid that is perfectly flat inside the play space and rises beyond it."""
+    """A square grid that is perfectly flat inside the play space and rises beyond it.
+
+    height_fn and color_fn are authored around the old edge; each vertex samples them at its
+    authored radius, so hills, shores and craters move out together with the rim dressing.
+    """
     count = int(half * 2 / step) + 1
     verts, colors, faces = [], [], []
     for iz in range(count):
@@ -384,9 +453,16 @@ def terrain(scene, material, height_fn, color_fn, half=60.0, step=1.5, flat_radi
         for ix in range(count):
             x = -half + ix * step
             r = math.hypot(x, z)
-            y = flat_height if r <= flat_radius else flat_height + height_fn(x, z, r)
+            ra = scene.authored_radius(r)
+            k = ra / r if r > 1e-6 else 1.0
+            ax, az = x * k, z * k
+            if ra <= flat_radius:
+                y = flat_height
+            else:
+                h = height_fn(ax, az, ra)
+                y = flat_height + (h * camera_clearance(x, z, r) if h > 0 else h)
             verts.append((x, y, z))
-            colors.append(color_fn(x, y, z, r))
+            colors.append(color_fn(ax, y, az, ra))
     for iz in range(count - 1):
         for ix in range(count - 1):
             a = iz * count + ix

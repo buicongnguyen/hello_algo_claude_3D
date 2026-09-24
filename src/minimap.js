@@ -1,6 +1,10 @@
 import { ENVIRONMENTS } from "./journey-data.js";
+import { PLAY_RADIUS } from "./presentation.js";
+
+// The radar shows the whole play space plus a small margin; its disc edge is the play boundary.
+const SPAN = (PLAY_RADIUS + 2.5) * 2;
 export function mapPoint(point, yaw, size = 160) {
-  const scale = size / 44;
+  const scale = size / SPAN;
   return { x: size / 2 + (point.x * Math.cos(yaw) - point.z * Math.sin(yaw)) * scale,
     y: size / 2 + (point.x * Math.sin(yaw) + point.z * Math.cos(yaw)) * scale };
 }
@@ -33,10 +37,10 @@ export class Minimap {
     const ctx = this.ctx, size = this.canvas.width, yaw = game.world.cameraYaw || 0;
     ctx.clearRect(0, 0, size, size);
     ctx.fillStyle = "#123f5a"; ctx.fillRect(0, 0, size, size);
-    ctx.beginPath(); ctx.arc(size / 2, size / 2, size * 20 / 44, 0, Math.PI * 2);
+    ctx.beginPath(); ctx.arc(size / 2, size / 2, size * PLAY_RADIUS / SPAN, 0, Math.PI * 2);
     ctx.fillStyle = game.stage.theme === "moonpool" ? "#344a6d" : game.stage.theme === "scrapyard" ? "#535073" : "#758876";
     if (game.stage.scene) ctx.fillStyle = `#${ENVIRONMENTS[game.stage.scene].ground.toString(16).padStart(6,"0")}`;
-    ctx.fill(); ctx.strokeStyle = "#8adbd0"; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fill(); ctx.strokeStyle = "#bff4ff"; ctx.lineWidth = 2; ctx.setLineDash([5, 3]); ctx.stroke(); ctx.setLineDash([]);
     ctx.save(); ctx.clip();
     const colors = { enemy: "#ff735f", friend: "#6dffb5", loot: "#fbc563", target: "#fff1a4", landmark: "#bdcbde", player: "#ffffff" };
     for (const marker of mapMarkers(game, target)) {
@@ -59,7 +63,7 @@ export class Minimap {
       } else { ctx.arc(p.x, p.y, marker.type === "enemy" ? 2.8 : 2, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.restore();
-    const north = mapPoint({ x: 0, z: -19 }, yaw, size);
+    const north = mapPoint({ x: 0, z: -(PLAY_RADIUS + 1) }, yaw, size);
     ctx.font = "bold 9px Segoe UI"; ctx.fillStyle = "#ddfbff"; ctx.fillText("N", north.x - 3, north.y);
     this.canvas.setAttribute("aria-label", `Survey radar. KAI at ${Math.round(game.player.x)}, ${Math.round(game.player.z)}. ${target?.label || "Explore freely"}. White arrow: you; red circles: enemies; green diamonds: friends; gold diamonds: loot; star: objective.`);
   }

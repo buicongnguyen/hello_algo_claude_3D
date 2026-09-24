@@ -5,6 +5,8 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { Pass, FullScreenQuad } from "three/addons/postprocessing/Pass.js";
+import { CopyShader } from "three/addons/shaders/CopyShader.js";
 
 // Quality is a rendering budget. It never changes gameplay, collision or timing.
 export const QUALITY_PROFILES = Object.freeze({
@@ -45,6 +47,34 @@ const GradeShader = {
     }`,
 };
 
+// Multisampling is paid once: the scene renders into a private MSAA target (with the stencil the
+// x-ray silhouette needs), resolves a single time, and every later pass works on plain targets.
+class SceneMSAAPass extends Pass {
+  constructor(scene, camera, samples, onRendered) {
+    super();
+    this.scene = scene;
+    this.camera = camera;
+    this.onRendered = onRendered;
+    this.needsSwap = false;
+    this.target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples, stencilBuffer: true });
+    this.copy = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: THREE.UniformsUtils.clone(CopyShader.uniforms), vertexShader: CopyShader.vertexShader, fragmentShader: CopyShader.fragmentShader, depthTest: false, depthWrite: false }));
+  }
+
+  setSize(width, height) { this.target.setSize(width, height); }
+
+  render(renderer, writeBuffer, readBuffer) {
+    renderer.setRenderTarget(this.target);
+    renderer.clear();
+    renderer.render(this.scene, this.camera);
+    this.onRendered();
+    this.copy.material.uniforms.tDiffuse.value = this.target.texture;
+    renderer.setRenderTarget(this.renderToScreen ? null : readBuffer);
+    this.copy.render(renderer);
+  }
+
+  dispose() { this.target.dispose(); this.copy.material.dispose(); this.copy.dispose(); }
+}
+
 export class RenderPipeline {
   constructor(renderer, scene, camera) {
     this.renderer = renderer;
@@ -68,12 +98,9 @@ export class RenderPipeline {
     if (!this.profile.post || !this.renderer.capabilities.isWebGL2) return;
     // EffectComposer treats a supplied target's size as CSS pixels; setSize() below applies the pixel ratio.
     const size = this.renderer.getSize(new THREE.Vector2());
-    const target = new THREE.WebGLRenderTarget(Math.max(1, size.x), Math.max(1, size.y), { type: THREE.HalfFloatType, samples: this.profile.samples });
+    const target = new THREE.WebGLRenderTarget(Math.max(1, size.x), Math.max(1, size.y), { type: THREE.HalfFloatType });
     const composer = new EffectComposer(this.renderer, target);
-    const scenePass = new RenderPass(this.scene, this.camera);
-    const renderScene = scenePass.render.bind(scenePass);
-    scenePass.render = (...args) => { renderScene(...args); this.recordScene(); };
-    composer.addPass(scenePass);
+    composer.addPass(new SceneMSAAPass(this.scene, this.camera, this.profile.samples, () => this.recordScene()));
     if (this.profile.ao) {
       const ao = new GTAOPass(this.scene, this.camera, Math.max(1, size.x >> 1), Math.max(1, size.y >> 1));
       ao.updateGtaoMaterial({ radius: .55, distanceExponent: 1.4, thickness: 1.2, scale: 1.15, samples: 12 });

@@ -3,7 +3,7 @@ import { applyHit, earnedUpgrades, medalFor, recordResult, sequenceStep, availab
 import { Combat } from "./combat.js";
 import { Expedition } from "./expeditions.js";
 import { dressRobot, equipmentStats } from "./equipment.js";
-import { actorHeight, VICTORY_DURATION } from "./presentation.js";
+import { actorHeight, PLAY_RADIUS, VICTORY_DURATION } from "./presentation.js";
 import { challengeStatus, runSummary } from "./mission-report.js";
 import { ALL_STAGES } from "./missions.js";
 import { isStoryMode, storyFor } from "./story.js";
@@ -94,6 +94,7 @@ export class Game {
     // Equipped Twin Thrusters already are a flight rig; never stack a second pair on KAI.
     fitTravelRig(this.world, this.player.object, travel === "fly" && this.progress.equipment.equipped.back === "thrusters" ? null : travel);
     this.travel = travel || "walk";
+    this.world.addSilhouette?.(this.player.object);
     this.ui.callbacks?.ambience?.(this.stage);
     if (["scan","escort","homecoming"].includes(this.stage.type)) this.discovery = new DiscoveryActivity(this);
     if (this.combat.enabled && this.progress.equipment.equipped.software === "frost") this.combat.freezeCharges = 1;
@@ -427,12 +428,12 @@ export class Game {
     if (moving) {
       const heading = this.dashTime > 0 ? this.dashMove : direction;
       const speed = this.player.speed * (this.dashTime > 0 ? 2.4 : 1);
-      this.player.x = clamp(this.player.x + heading.x * speed * dt, -18, 18);
-      this.player.z = clamp(this.player.z + heading.z * speed * dt, -18, 18);
+      this.player.x += heading.x * speed * dt;
+      this.player.z += heading.z * speed * dt;
       this.world.constrainPlayer?.(this.player);
-      const islandLimit = 18.5;
+      // One circular edge everywhere; the boundary fence in the world marks exactly this radius.
       const radius = Math.hypot(this.player.x, this.player.z);
-      if (radius > islandLimit) { this.player.x *= islandLimit / radius; this.player.z *= islandLimit / radius; }
+      if (radius > PLAY_RADIUS) { this.player.x *= PLAY_RADIUS / radius; this.player.z *= PLAY_RADIUS / radius; }
       this.player.facing = Math.atan2(heading.x, heading.z);
       this.player.object.position.set(this.player.x, 0.55 + Math.sin(this.elapsed * 10) * 0.035, this.player.z);
       this.stepTimer -= dt;

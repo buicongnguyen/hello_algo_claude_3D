@@ -29,6 +29,21 @@ Extras: storm lightning flashes, underwater light shafts, and a procedural Earth
 
 **Characters** keep their geometry and rigs. Painted shells gain a lacquered clear coat (`KHR_materials_clearcoat`), and eyes and indicator lights export with emissive strength, so they catch bloom.
 
+## 2b. Play-space boundary
+
+- **Wider space:** `PLAY_RADIUS` in `src/presentation.js` (now 21 m, previously 18.5 m) is the one edge for KAI, enemies, the radar and the scenery. The old square clamp is gone.
+- **Scenery follows the edge:** Blender scenes stay authored around the old edge. `build_journey.py` reads `PLAY_RADIUS` and moves rim dressing and terrain features outward. Each prop moves as one rigid piece; objectives and interior props never move.
+- **Readable edge** (`src/boundary.js`):
+  - A faint dashed ground ring is always visible.
+  - A holographic fence lights up only within a few metres of KAI and brightens against the edge.
+  - Both take each destination's rim tint.
+- **Radar:** the minimap's dashed disc edge is the same boundary.
+- **Always visible:**
+  - Terrain on the camera side of each scene stays low, and tall trees, palms and cargo are kept off it.
+  - Where scenery does hide KAI, a stencil-based x-ray silhouette shows the robot through it.
+  - An automated line-of-sight check at 16 points on the edge of all 17 scenes passes. The one exception, standing directly behind a festival stall, is covered by the silhouette.
+- **Rendering fix found while profiling:** MSAA now applies only to the scene render. It had also been applied to every post-processing target, which cost roughly half to two thirds of high-profile frame throughput.
+
 ## 3. Game feel and audio
 
 - A pooled particle system (one draw call) drives hit sparks, defeat bursts, pickup and collect sparkles, gate bursts, dash puffs and footsteps: dust on land, bubbles underwater, jet sparks in flight.

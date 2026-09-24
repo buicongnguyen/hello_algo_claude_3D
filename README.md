@@ -10,6 +10,7 @@ This is a playable browser-game foundation, with a documented roadmap toward a m
 
 - Fifteen rebuilt Blender environments with baked colour and occlusion, material-batched Draco meshes, landscapes beyond the play space and exported collision. Each has its own sky, light and fog. See [AAA_REVIEW.md](./AAA_REVIEW.md).
 - HDR rendering with MSAA, ambient occlusion, bloom, soft shadows that follow KAI, and scene-matched reflections. Quality tiers: desktop `high`, phone `medium`, software WebGL `low`.
+- A 21 m circular play space, marked by a dashed ground ring and a fence that lights up as you approach. KAI shows as an x-ray silhouette when scenery hides the robot.
 - Impact feedback (sparks, hit flash, knockback, hit-stop, camera shake, damage flash), smooth turning, synthesized sound cues and an ambient bed per destination.
 - Fifteen unique destinations, grouped into five chapters of three stages. Each has its own story, discovery and one primary activity.
 - Spatial relay puzzles, reef rescues, artifact scanning, prebuilt-turret defense, a research-buoy escort, aerial duel, flight routes and a museum homecoming.

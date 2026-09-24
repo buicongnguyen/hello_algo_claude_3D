@@ -11,6 +11,9 @@ import { Particles, Shake, turnToward } from "../src/feedback.js";
 import { atmosphereFor, ATMOSPHERES } from "../src/atmosphere.js";
 import { ENVIRONMENTS } from "../src/journey-data.js";
 import { resolveQuality, QUALITY_PROFILES } from "../src/render.js";
+import { PLAY_RADIUS } from "../src/presentation.js";
+import { Boundary } from "../src/boundary.js";
+import { mapPoint } from "../src/minimap.js";
 
 function harness(progress = createProgress({ settings: { campaignMode: "challenge" } })) {
   const mission = new THREE.Group();
@@ -167,4 +170,29 @@ test("every destination has an art-directed atmosphere and quality never changes
   assert.equal(resolveQuality("auto", 1400, true), "low", "software rendering falls back to the low profile");
   assert.equal(resolveQuality("high", 1400, true), "high", "an explicit choice is always respected");
   assert.equal(QUALITY_PROFILES.low.post, false);
+});
+
+test("the play space is one circle shared by KAI, enemies, the fence and the radar", () => {
+  const { game } = harness(); game.begin(findStage("wake"));
+  assert.equal(PLAY_RADIUS, 21);
+  for (const angle of [0, Math.PI / 4, 1.2, Math.PI, 4.1]) {
+    game.player.x = Math.cos(angle) * 17; game.player.z = Math.sin(angle) * 17;
+    game.lastMove = { x: Math.cos(angle), z: Math.sin(angle) };
+    game.dashMove = game.lastMove; game.dashTime = 10;
+    for (let i = 0; i < 60; i++) game.updatePlayer(.05);
+    assert.ok(Math.abs(Math.hypot(game.player.x, game.player.z) - PLAY_RADIUS) < 1e-6, "KAI reaches exactly the circular edge, with no square clamp");
+  }
+  game.begin(findStage("fragment"));
+  const enemy = game.spawnEnemy(false, 0); Object.assign(enemy, { x: 30, z: 0, attackState: "approach" });
+  game.combat.moveEnemy(enemy, { x: 40, z: 0 }, .1);
+  assert.ok(Math.hypot(enemy.x, enemy.z) <= PLAY_RADIUS - .5 + 1e-9);
+  const fence = new Boundary(PLAY_RADIUS);
+  fence.update(.1, { x: 0, z: 0 });
+  assert.ok(fence.uniforms.proximity.value < .01, "the fence stays hidden in the middle of the play space");
+  for (let i = 0; i < 30; i++) fence.update(.1, { x: PLAY_RADIUS, z: 0 });
+  assert.ok(fence.uniforms.proximity.value > .95, "the fence is fully lit at the edge");
+  fence.update(.1, null); assert.equal(fence.group.visible, false);
+  fence.dispose();
+  const edge = mapPoint({ x: PLAY_RADIUS, z: 0 }, 0, 160), centre = mapPoint({ x: 0, z: 0 }, 0, 160);
+  assert.ok(edge.x - centre.x < 80, "the radar shows the whole play space");
 });

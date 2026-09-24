@@ -9,7 +9,8 @@ import { dressRobot } from "./equipment.js";
 import { createSurfaces, finishMaterial, grassGeometry, groundCoverTexture } from "./surfaces.js";
 import { buildDistrict } from "./districts.js";
 import { JOURNEY_MODEL_NAMES, ENVIRONMENTS } from "./journey-data.js";
-import { actorScale, cameraZoom, CAMERA_YAW, departureHeight, limbPhase, VICTORY_DURATION } from "./presentation.js";
+import { actorScale, cameraZoom, CAMERA_YAW, departureHeight, limbPhase, PLAY_RADIUS, VICTORY_DURATION } from "./presentation.js";
+import { Boundary } from "./boundary.js";
 
 const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm", "octopus", "starfish", "snail", "clam", "coral_cluster", "reef_arch", "salvage_tower", "moon_mushroom", "software_disc", "prism_armor", "twin_thrusters", "halo_antenna", "starship"];
 
@@ -23,7 +24,8 @@ export class World {
     this.camera = new THREE.PerspectiveCamera(47, 1, 0.1, 160);
     this.camera.position.set(13, 16, 20);
     this.camera.lookAt(0, 0, 0);
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+    // The stencil buffer lets KAI's x-ray silhouette appear only where scenery hides the robot.
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, stencil: true, powerPreference: "high-performance" });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1;
@@ -51,6 +53,8 @@ export class World {
     this.particles = new Particles();
     this.scene.add(this.particles.points);
     this.shakeState = new Shake();
+    this.boundary = new Boundary(PLAY_RADIUS);
+    this.scene.add(this.boundary.group);
     this.shakeOffset = new THREE.Vector3();
     this.drawingSize = new THREE.Vector2();
     this.cameraTarget = new THREE.Vector3();
@@ -157,7 +161,7 @@ export class World {
     this.shared.add(this.water);
 
     const island = new THREE.Mesh(
-      new THREE.CylinderGeometry(20, 23, 1.15, 64),
+      new THREE.CylinderGeometry(PLAY_RADIUS + 2.5, PLAY_RADIUS + 5.5, 1.15, 72),
       new THREE.MeshStandardMaterial({ color: 0xf0c878, roughness: 0.94, ...this.surfaces.sand, normalScale: new THREE.Vector2(.2, .2) }),
     );
     island.position.y = -0.15;
@@ -165,7 +169,7 @@ export class World {
     this.shared.add(island);
     this.island = island;
 
-    const inner = new THREE.Mesh(new THREE.CircleGeometry(18.5, 64), new THREE.MeshStandardMaterial({ color: 0xf6db91, roughness: 0.98, ...this.surfaces.sand, normalScale: new THREE.Vector2(.35, .35) }));
+    const inner = new THREE.Mesh(new THREE.CircleGeometry(PLAY_RADIUS + 1.2, 72), new THREE.MeshStandardMaterial({ color: 0xf6db91, roughness: 0.98, ...this.surfaces.sand, normalScale: new THREE.Vector2(.35, .35) }));
     inner.rotation.x = -Math.PI / 2;
     inner.position.y = 0.44;
     inner.receiveShadow = true;
@@ -179,7 +183,7 @@ export class World {
     this.boardwalk = boardwalk;
 
     const cliff = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 7.5, 2.2, 20, 1, false, 0, Math.PI), new THREE.MeshStandardMaterial({ color: 0x76604d, roughness: 1 }));
-    cliff.position.set(22, -0.4, -11);
+    cliff.position.set(PLAY_RADIUS + 5, -0.4, -11);
     cliff.rotation.y = -Math.PI / 2;
     cliff.receiveShadow = true;
     this.shared.add(cliff);
@@ -196,7 +200,7 @@ export class World {
     const rock = new THREE.Object3D();
     for (let i = 0; i < 34; i += 1) {
       const angle = i * 2.399;
-      const radius = 17 + (i % 3) * 1.3;
+      const radius = PLAY_RADIUS + .9 + (i % 3) * .6;
       rock.position.set(Math.cos(angle) * radius, 0.52, Math.sin(angle) * radius);
       const size = 0.22 + (i % 4) * 0.07;
       rock.scale.set(size, size * 0.55, size);
@@ -206,7 +210,7 @@ export class World {
     }
     this.shared.add(rocks);
 
-    const foam = new THREE.Mesh(new THREE.RingGeometry(20.2, 21.3, 96), new THREE.MeshBasicMaterial({ color: 0xd0faf6, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+    const foam = new THREE.Mesh(new THREE.RingGeometry(PLAY_RADIUS + 2.7, PLAY_RADIUS + 3.8, 96), new THREE.MeshBasicMaterial({ color: 0xd0faf6, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
     foam.rotation.x = -Math.PI / 2;
     foam.position.y = -0.48;
     this.shared.add(foam);
@@ -222,7 +226,7 @@ export class World {
     const grasses = new THREE.InstancedMesh(grassGeometry(), new THREE.MeshStandardMaterial({ color: 0x6b8242, roughness: 1, side: THREE.DoubleSide }), 70);
     for (let i = 0; i < 70; i++) {
       const angle = i * 2.399;
-      const radius = 16.3 + (i % 4) * 0.5;
+      const radius = PLAY_RADIUS - .4 + (i % 4) * 0.5;
       rock.position.set(Math.cos(angle) * radius, 0.45, Math.sin(angle) * radius);
       rock.scale.setScalar(0.6 + (i % 3) * 0.3); rock.updateMatrix(); grasses.setMatrixAt(i, rock.matrix);
     }
@@ -290,6 +294,7 @@ export class World {
     this.hemi.intensity = look.hemi;
     this.rim.color.setHex(look.rim);
     this.rim.intensity = look.rimIntensity;
+    this.boundary.setColor(look.rim);
     this.rim.position.set(-sun.x * 20, 9, -sun.z * 20 - 6);
     this.renderer.toneMappingExposure = look.exposure;
     this.pipeline.setBloom(look.bloom);
@@ -320,10 +325,11 @@ export class World {
     // All decoration lives on the rim; required paths and pickups stay open.
     for (let i = 0; i < 8; i++) {
       const angle = i * Math.PI / 4 + 0.12;
-      const p = { x: Math.cos(angle) * 17.2, z: Math.sin(angle) * 17.2 };
+      // Rim decoration stands just outside the play boundary, on the island's beach slope.
+      const p = { x: Math.cos(angle) * (PLAY_RADIUS + 1.3), z: Math.sin(angle) * (PLAY_RADIUS + 1.3) };
       const object = this.createActor(model, p, 0.95 + i % 2 * 0.2);
       object.rotation.y = -angle;
-      this.obstacles.push({ ...p, radius: 0.52 }); this.mapLandmarks.push(p);
+      this.mapLandmarks.push(p);
     }
     for (const [x, z, radius] of [[-10, -1, 2.5], [7, -10, 2.5], [9, 9, 1.7]]) {
       const pool = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), new THREE.MeshStandardMaterial({ color: theme === "scrapyard" ? 0x705bc6 : 0x399cae, emissive: theme === "moonpool" ? 0x164f76 : 0x000000, roughness: 0.3 }));
@@ -416,6 +422,42 @@ export class World {
       limb.rotation.x = moving ? Math.sin(time * (dog ? 9 : 11)) * (dog ? 0.35 : 0.42) * limbPhase(limb.name, dog) : 0;
     }
     for (const tail of object.userData.tails || []) tail.rotation.z = Math.sin(time * (moving ? 7 : 3)) * 0.3;
+  }
+
+  // Used by the automated camera check: true when scenery blocks the straight line from a to b.
+  lineOfSight(a, b) {
+    const from = new THREE.Vector3(a.x, a.y, a.z), to = new THREE.Vector3(b.x, b.y, b.z);
+    const direction = to.clone().sub(from), length = direction.length();
+    const ray = new THREE.Raycaster(from, direction.normalize(), .05, length);
+    const scenery = this.journeyRoot ? [this.journeyRoot] : [this.shared];
+    return !ray.intersectObjects(scenery, true).some(hit => hit.object.isMesh && !hit.object.material?.transparent && !/^Journey (Glow|Water|Cloud)/.test(hit.object.material?.name || ""));
+  }
+
+  addSilhouette(actor, color = 0x6fdcff) {
+    // Visible pixels of the actor mark the stencil; the ghost draws only where the actor is hidden.
+    const ghost = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .5, depthWrite: false, depthFunc: THREE.GreaterDepth, fog: false,
+      stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp });
+    const meshes = [];
+    actor.traverse(child => { if (child.isMesh && !child.userData.silhouette && !child.material?.transparent) meshes.push(child); });
+    for (const mesh of meshes) {
+      // Draw after all opaque scenery: an occluder drawn later would hide pixels already marked visible.
+      mesh.renderOrder = 2;
+      for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        Object.assign(material, { stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp });
+      }
+      const shadow = new THREE.Mesh(mesh.geometry, ghost);
+      shadow.userData.silhouette = true;
+      shadow.renderOrder = 6;
+      shadow.castShadow = shadow.receiveShadow = false;
+      mesh.add(shadow);
+    }
+  }
+
+  sightBlockers(a, b) {
+    const from = new THREE.Vector3(a.x, a.y, a.z), to = new THREE.Vector3(b.x, b.y, b.z);
+    const direction = to.clone().sub(from), length = direction.length();
+    const ray = new THREE.Raycaster(from, direction.normalize(), .05, length);
+    return ray.intersectObjects(this.journeyRoot ? [this.journeyRoot] : [this.shared], true).filter(hit => hit.object.isMesh).slice(0, 2).map(hit => `${hit.object.material?.name}@${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}`).join(";");
   }
 
   constrainPlayer(player) {
@@ -648,6 +690,7 @@ export class World {
       this.cameraTarget.lerp(this.desiredTarget.set(0, 1, -1), 1 - Math.exp(-dt * 1.8));
       this.camera.lookAt(this.cameraTarget);
     }
+    this.boundary.update(dt, focus && !this.celebration && !this.previewActor ? focus : null, reducedMotion);
     this.shakeOffset.copy(this.shakeState.update(dt, reducedMotion));
     this.camera.position.add(this.shakeOffset);
     this.followLight(reducedMotion, dt);

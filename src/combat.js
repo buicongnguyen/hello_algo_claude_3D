@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { actorHeight } from "./presentation.js";
+import { actorHeight, PLAY_RADIUS } from "./presentation.js";
 import { flashActor } from "./feedback.js";
 
 const aimHeight = entity => actorHeight(entity.object, entity.variant === "drone" ? 0.38 : entity.variant === "dog" ? 1.15 : 1.35);
@@ -264,8 +264,8 @@ export class Combat {
         if (enemy.attackTime <= 0) { enemy.attackState = "recover"; enemy.attackTime = 0.8; }
       } else if (enemy.attackState === "recover" && enemy.attackTime <= 0) enemy.attackState = "approach";
     }
-    const radius = Math.hypot(enemy.x, enemy.z);
-    if (radius > 18) { enemy.x *= 18 / radius; enemy.z *= 18 / radius; }
+    const radius = Math.hypot(enemy.x, enemy.z), limit = PLAY_RADIUS - .5;
+    if (radius > limit) { enemy.x *= limit / radius; enemy.z *= limit / radius; }
     g.world.constrainPlayer?.(enemy);
     const height = enemy.variant === "drone" ? (enemy.attackState === "rush" ? 0.95 : 1.85 + Math.sin(g.elapsed * 5 + enemy.x) * 0.2) : 0.55;
     enemy.object.position.set(enemy.x, height, enemy.z);
