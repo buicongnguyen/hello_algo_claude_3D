@@ -14,6 +14,9 @@ import { resolveQuality, QUALITY_PROFILES } from "../src/render.js";
 import { PLAY_RADIUS } from "../src/presentation.js";
 import { Boundary } from "../src/boundary.js";
 import { mapPoint } from "../src/minimap.js";
+import { readFileSync } from "node:fs";
+import { World } from "../src/world.js";
+import { clearPath, moveAgent } from "../src/navigation.js";
 
 function harness(progress = createProgress({ settings: { campaignMode: "challenge" } })) {
   const mission = new THREE.Group();
@@ -34,6 +37,116 @@ function harness(progress = createProgress({ settings: { campaignMode: "challeng
   return { game, world, input, ui };
 }
 const move = (game, p) => { game.player.x = p.x; game.player.z = p.z; };
+
+const journeyAssets = JSON.parse(readFileSync(new URL("../public/models/journey-manifest.json", import.meta.url))).assets;
+function useColliders(world, name = "journey_beach") {
+  world.obstacles = journeyAssets.find(asset => asset.name === name).colliders.map(([x, z, radius]) => ({ x, z, radius }));
+  world.constrainPlayer = World.prototype.constrainPlayer;
+}
+
+test("bullet momentum pushes away from the shooter at every supported frame time", () => {
+  const { game } = harness(); game.begin(findStage("fragment"));
+  move(game, { x: 0, z: 0 });
+  for (const dt of [1 / 120, 1 / 60, 1 / 30, .05]) for (const distance of [.7, 1.1, 4.4]) for (const angle of [0, Math.PI / 3, Math.PI]) {
+    const start = { x: Math.cos(angle) * distance, z: Math.sin(angle) * distance };
+    const enemy = game.makeEntity("enemy", "rust_scout", start, 1, { health: 10, maxHealth: 10, variant: "bot" });
+    game.entities = [enemy];
+    game.combat.makeBullet(enemy, { color: 0x65e5ff, damage: 1 });
+    for (let tick = 0; tick < 120 && game.combat.bullets.length; tick++) game.combat.updateBullets(dt);
+    assert.equal(enemy.health, 9);
+    assert.ok(Math.abs(enemy.x - start.x - Math.cos(angle) * .32) < 1e-8, `X knockback: dt=${dt}, distance=${distance}`);
+    assert.ok(Math.abs(enemy.z - start.z - Math.sin(angle) * .32) < 1e-8, `Z knockback: dt=${dt}, distance=${distance}`);
+  }
+});
+
+test("knockback cannot push a disabled robot or its loot into a solid prop", () => {
+  const { game, world } = harness(); game.begin(findStage("fragment"));
+  world.obstacles = [{ x: 3, z: 0, radius: 1 }];
+  const enemy = game.entities.find(entity => entity.kind === "enemy");
+  Object.assign(enemy, { x: 1, z: 0, health: 10, maxHealth: 10 });
+  move(game, { x: -1, z: 0 });
+  game.combat.hit(enemy, 1);
+  assert.equal(enemy.health, 9);
+  assert.equal(enemy.x, 1, "the hit deals damage but does not embed the robot in the obstacle");
+  world.obstacles = [];
+  game.combat.hit(enemy, 1);
+  assert.equal(enemy.x, 1.32, "pulse / arc attacks still push away from their source");
+});
+
+test("all enemy variants detour around a real Blender prop before winding up", () => {
+  for (const index of [0, 1, 2]) for (const dt of [1 / 60, .05]) {
+    const { game, world } = harness(); game.begin(findStage("fragment")); useColliders(world);
+    const enemy = game.entities.filter(entity => entity.kind === "enemy")[index];
+    Object.assign(enemy, { x: -15.1, z: 1, attackState: "approach" });
+    move(game, { x: -10.9, z: 1 });
+    let approached = false;
+    for (let tick = 0; tick < 15 / dt; tick++) {
+      const before = { x: enemy.x, z: enemy.z };
+      game.combat.moveEnemy(enemy, game.player, dt);
+      assert.ok(clearPath(before, enemy, world.obstacles, enemy.radius), "every movement step clears the scenery");
+      assert.ok(Math.hypot(enemy.x, enemy.z) <= PLAY_RADIUS - .5 + 1e-6);
+      if (enemy.attackState === "windup") { approached = true; break; }
+    }
+    assert.ok(approached, `${enemy.variant} must not remain stuck behind the beach prop`);
+    assert.ok(clearPath(enemy, game.player, world.obstacles, enemy.radius), "do not commit a charge into a wall");
+  }
+});
+
+test("summoned crabs have a footprint and route around solid scenery to help", () => {
+  const { game, world } = harness(); game.begin(findStage("fragment")); useColliders(world);
+  const enemy = game.entities.find(entity => entity.kind === "enemy");
+  Object.assign(enemy, { x: -10.5, z: 1, health: 100, maxHealth: 100 }); game.entities = [enemy];
+  move(game, { x: -16, z: 1 });
+  game.combat.whistles = 1; assert.equal(game.combat.callAnimals(), true);
+  for (const animal of game.combat.animals) assert.equal(animal.radius, .45);
+  Object.assign(game.combat.animals[0], { x: -15, z: 1 });
+  for (const animal of game.combat.animals.slice(1)) animal.life = 0;
+  for (let tick = 0; tick < 200 && enemy.health === 100; tick++) {
+    const before = game.combat.animals.map(a => ({ x: a.x, z: a.z }));
+    game.combat.updateAllies(.05);
+    game.combat.animals.forEach((animal, i) => assert.ok(clearPath(before[i], animal, world.obstacles, animal.radius)));
+  }
+  assert.ok(enemy.health < 100, "the crab crew reaches the enemy and attacks without passing through the prop");
+});
+
+test("recruited robots use the same safe detour before attacking through scenery", () => {
+  const { game, world } = harness(); game.begin(findStage("fragment")); useColliders(world);
+  const [ally, enemy] = game.entities.filter(entity => entity.kind === "enemy");
+  Object.assign(ally, { kind: "ally", x: -15.1, z: 1, cooldown: 0, index: 0 });
+  Object.assign(enemy, { x: -10.9, z: 1, health: 100, maxHealth: 100 }); game.entities = [ally, enemy];
+  game.combat.updateAllies(.05);
+  assert.equal(enemy.health, 100, "a blocked teammate must navigate instead of firing through the prop");
+  for (let tick = 0; tick < 300 && enemy.health === 100; tick++) {
+    const before = { x: ally.x, z: ally.z };
+    game.combat.updateAllies(.05);
+    assert.ok(clearPath(before, ally, world.obstacles, ally.radius));
+  }
+  assert.ok(enemy.health < 100, "the teammate reaches an unobstructed firing position");
+});
+
+test("navigation follows moving targets, overlapping props and the circular arena", () => {
+  const obstacles = [{ x: 0, z: 0, radius: 1.4 }, { x: 0, z: 2, radius: 1.4 }];
+  const actor = { x: -4, z: 1, radius: .9 };
+  let target = { x: 4, z: 1 };
+  for (let tick = 0; tick < 400; tick++) {
+    if (tick === 12) target = { x: 3, z: -4 };
+    const before = { x: actor.x, z: actor.z };
+    moveAgent(actor, target, .12, obstacles);
+    assert.ok(clearPath(before, actor, obstacles, actor.radius));
+    assert.ok(Math.hypot(actor.x - before.x, actor.z - before.z) <= .120001, "routing never teleports or exceeds speed");
+  }
+  assert.ok(Math.hypot(actor.x - target.x, actor.z - target.z) < .01);
+  for (let i = 0; i < 250; i++) moveAgent(actor, { x: 40, z: 0 }, .12, obstacles);
+  assert.ok(Math.hypot(actor.x, actor.z) <= PLAY_RADIUS - .5 + 1e-8);
+});
+
+test("unreachable destinations are bounded and agents recover when the target moves", () => {
+  const obstacles = [{ x: 0, z: 0, radius: 2 }], actor = { x: -4, z: 0, radius: .9 };
+  for (let i = 0; i < 30; i++) moveAgent(actor, { x: 0, z: 0 }, .12, obstacles);
+  assert.deepEqual(actor, { x: -4, z: 0, radius: .9 });
+  for (let i = 0; i < 300; i++) moveAgent(actor, { x: 4, z: 0 }, .12, obstacles);
+  assert.ok(Math.hypot(actor.x - 4, actor.z) < .01);
+});
 
 test("relay guidance never loops and a closed loop never reads as solved", () => {
   const { game } = harness(); game.begin(findStage("trail"));

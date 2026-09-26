@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { actorHeight, PLAY_RADIUS } from "./presentation.js";
 import { flashActor } from "./feedback.js";
+import { clearPath, moveAgent } from "./navigation.js";
 
 const aimHeight = entity => actorHeight(entity.object, entity.variant === "drone" ? 0.38 : entity.variant === "dog" ? 1.15 : 1.35);
 
@@ -195,7 +196,8 @@ export class Combat {
           const t = Math.max(0, Math.min(1, ((enemy.x - oldX) * dx + (enemy.z - oldZ) * dz) / (dx * dx + dz * dz || 1)));
           return { enemy, t, d: Math.hypot(enemy.x - oldX - t * dx, enemy.z - oldZ - t * dz) };
         }).filter(hit => hit.d < (hit.enemy.boss ? 1.3 : 0.85)).sort((a, b) => a.t - b.t)[0];
-        if (hit) { this.hit(hit.enemy, shot.damage, shot); shot.life = 0; }
+        // The swept hit may be behind the new bullet position; momentum still follows velocity.
+        if (hit) { this.hit(hit.enemy, shot.damage, shot, { x: shot.vx, z: shot.vz }); shot.life = 0; }
       }
       if (shot.life <= 0) {
         if (shot.beam) this.game.world.release(shot.object);
@@ -205,7 +207,7 @@ export class Combat {
     }
   }
 
-  hit(enemy, damage, source = this.game.player) {
+  hit(enemy, damage, source = this.game.player, direction = null) {
     if (!hostile(enemy)) return false;
     if (enemy.boss && enemy.state !== "exposed") {
       // Only KAI's own attacks explain the shield; helpers must never hide the charge telegraph.
@@ -215,8 +217,14 @@ export class Combat {
     enemy.health -= damage;
     enemy.flash = .14;
     if (!enemy.boss && source && Number.isFinite(source.x)) {
-      const away = distance(enemy, source) || 1;
-      enemy.x += (enemy.x - source.x) / away * .32; enemy.z += (enemy.z - source.z) / away * .32;
+      const dx = direction?.x ?? enemy.x - source.x, dz = direction?.z ?? enemy.z - source.z;
+      const away = Math.hypot(dx, dz) || 1;
+      const pushed = { x: enemy.x + dx / away * .32, z: enemy.z + dz / away * .32 };
+      const length = Math.hypot(pushed.x, pushed.z), limit = PLAY_RADIUS - .5;
+      if (length > limit) { pushed.x *= limit / length; pushed.z *= limit / length; }
+      if (clearPath(enemy, pushed, this.game.world.obstacles, enemy.radius ?? .9)) {
+        enemy.x = pushed.x; enemy.z = pushed.z;
+      }
       enemy.object.position.x = enemy.x; enemy.object.position.z = enemy.z;
     }
     this.game.world.particles?.emit(enemy.x, aimHeight(enemy), enemy.z, { count: 7, color: 0xffd166, speed: 4.5, up: 1, life: .28, size: .16, gravity: -6 });
@@ -234,8 +242,7 @@ export class Combat {
     let moving = false;
     const approach = () => {
       const step = Math.min(d, enemy.speed * dt);
-      enemy.x += (target.x - enemy.x) / d * step;
-      enemy.z += (target.z - enemy.z) / d * step;
+      moveAgent(enemy, target, step, g.world.obstacles);
       moving = true;
     };
     // Relay attackers follow their marked lanes. Dogs and drones still show intent near KAI.
@@ -243,7 +250,7 @@ export class Combat {
     if (!attackingPlayer) approach();
     else if (enemy.attackState === "approach") {
       const range = enemy.variant === "dog" ? 5 : enemy.variant === "drone" ? 7 : 1.8;
-      if (d > range) approach();
+      if (d > range || !clearPath(enemy, target, g.world.obstacles, enemy.radius)) approach();
       else {
         enemy.attackState = "windup";
         enemy.attackTime = enemy.variant === "drone" ? 0.85 : enemy.variant === "dog" ? 0.65 : 0.4;
@@ -308,7 +315,10 @@ export class Combat {
       const p = { x: this.game.player.x + (i - 1) * 1.2, z: this.game.player.z + 1.2 };
       const object = this.game.world.createActor("crab", p, 1);
       this.game.cloneMaterials(object); this.game.tint(object, 0xffc75f, 0.3);
-      this.animals.push({ ...p, object, cooldown: 0, animal: true, index: i });
+      const animal = { ...p, object, radius: .45, cooldown: 0, animal: true, index: i };
+      this.game.world.constrainPlayer?.(animal);
+      object.position.x = animal.x; object.position.z = animal.z;
+      this.animals.push(animal);
     }
     for (const animal of this.animals) { animal.life = 14; animal.object.visible = true; }
     this.game.ui.message("Crab crew reporting for pinch duty! 14 seconds of help.");
@@ -363,15 +373,16 @@ export class Combat {
       const destination = target || { x: this.game.player.x + (ally.index - 1) * 1.8, z: this.game.player.z + 2 };
       const d = distance(ally, destination) || 1;
       const range = ally.animal ? 1.35 : 6;
-      if (d > (target ? range * 0.8 : 1)) {
+      const clear = clearPath(ally, destination, this.game.world.obstacles, ally.radius);
+      if (d > (target ? range * 0.8 : 1) || !clear) {
         const step = Math.min(d, dt * (ally.animal ? 5.2 : 4));
-        ally.x += (destination.x - ally.x) / d * step; ally.z += (destination.z - ally.z) / d * step;
+        moveAgent(ally, destination, step, this.game.world.obstacles);
       }
       this.game.world.constrainPlayer?.(ally);
       ally.object.position.set(ally.x, ally.variant === "drone" ? 1.8 : 0.55 + (ally.animal ? Math.abs(Math.sin(this.game.elapsed * 12)) * 0.15 : 0), ally.z);
       ally.object.rotation.y = Math.atan2(destination.x - ally.x, destination.z - ally.z);
       this.game.world.animateActor?.(ally.object, this.game.elapsed, d > range);
-      if (target && d < range && ally.cooldown <= 0) {
+      if (target && clear && distance(ally, target) < range && ally.cooldown <= 0) {
         ally.cooldown = ally.animal ? 1.2 : 1;
         this.makeBolt([ally, target], ally.animal ? 0xffc75f : 0x65ed9c);
         this.hit(target, 1, ally);
