@@ -18,6 +18,8 @@ const fragmentShader = /* glsl */`
     float d = length(gl_PointCoord - 0.5);
     float alpha = smoothstep(0.5, 0.0, d);
     gl_FragColor = vec4(vColor * alpha, alpha);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }`;
 
 export class Particles {
@@ -44,18 +46,20 @@ export class Particles {
     this.points.frustumCulled = false;
     this.points.renderOrder = 4;
     this.alive = 0;
+    this.scratch = new THREE.Color();
+    this.position.fill(-1e4);
   }
 
   emit(x, y, z, { count = 12, color = 0xffffff, speed = 3, up = 1.5, life = .55, size = .22, gravity = -4, drag = 2.5, spread = .2 } = {}) {
-    const tint = new THREE.Color(color);
+    const tint = this.scratch.set(color);
     for (let n = 0; n < count; n++) {
-      const i = this.cursor;
+      const i = this.cursor, k = i * 3;
       this.cursor = (this.cursor + 1) % this.max;
       const a = Math.random() * Math.PI * 2, e = Math.random() * 2 - 1, s = speed * (.35 + Math.random() * .65);
       const horizontal = Math.sqrt(1 - e * e);
-      this.position.set([x + (Math.random() - .5) * spread, y + (Math.random() - .5) * spread, z + (Math.random() - .5) * spread], i * 3);
-      this.velocity.set([Math.cos(a) * horizontal * s, Math.abs(e) * s * .6 + up * (.5 + Math.random() * .5), Math.sin(a) * horizontal * s], i * 3);
-      this.tint.set([tint.r, tint.g, tint.b], i * 3);
+      this.position[k] = x + (Math.random() - .5) * spread; this.position[k + 1] = y + (Math.random() - .5) * spread; this.position[k + 2] = z + (Math.random() - .5) * spread;
+      this.velocity[k] = Math.cos(a) * horizontal * s; this.velocity[k + 1] = Math.abs(e) * s * .6 + up * (.5 + Math.random() * .5); this.velocity[k + 2] = Math.sin(a) * horizontal * s;
+      this.tint[k] = tint.r; this.tint[k + 1] = tint.g; this.tint[k + 2] = tint.b;
       this.life[i] = this.span[i] = life * (.7 + Math.random() * .6);
       this.baseSize[i] = size * (.7 + Math.random() * .6);
       this.gravity[i] = gravity;
@@ -70,7 +74,7 @@ export class Particles {
     for (let i = 0; i < this.max; i++) {
       if (this.life[i] <= 0) { if (this.size[i]) this.size[i] = 0; continue; }
       this.life[i] = Math.max(0, this.life[i] - dt);
-      if (this.life[i] <= 0) { this.size[i] = 0; continue; }
+      if (this.life[i] <= 0) { this.size[i] = 0; this.position[i * 3 + 1] = -1e4; continue; }
       alive++;
       const k = i * 3, damping = Math.exp(-this.drag[i] * dt);
       this.velocity[k] *= damping; this.velocity[k + 2] *= damping;
@@ -88,8 +92,8 @@ export class Particles {
   }
 
   clear() {
-    this.life.fill(0); this.size.fill(0); this.alive = 0;
-    this.geometry.attributes.size.needsUpdate = true;
+    this.life.fill(0); this.size.fill(0); this.color.fill(0); this.position.fill(-1e4); this.alive = 0;
+    for (const name of ["position", "color", "size"]) this.geometry.attributes[name].needsUpdate = true;
   }
 }
 

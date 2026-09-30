@@ -1,4 +1,20 @@
+// Pointer presses this soon after input turns on belong to the menu tap that started play.
+const ENABLE_GRACE_MS = 300;
+
 export class InputController {
+  #enabled = false;
+  enabledAt = -Infinity;
+  get enabled() { return this.#enabled; }
+  set enabled(value) {
+    if (value && !this.#enabled) this.enabledAt = performance.now();
+    this.#enabled = Boolean(value);
+  }
+  // Uses the event's own time, so taps queued while a stage was still building count as early too.
+  settling(event) {
+    const time = event?.timeStamp > 0 && event.timeStamp < 1e12 ? event.timeStamp : performance.now();
+    return time - this.enabledAt < ENABLE_GRACE_MS;
+  }
+
   constructor() {
     this.keys = new Set();
     this.actions = new Set();
@@ -9,7 +25,7 @@ export class InputController {
     this.bindTouch();
     const canvas = document.querySelector("#game");
     canvas?.addEventListener("pointerdown", event => {
-      if (!this.enabled || event.button !== 0 || event.pointerType !== "mouse") return;
+      if (!this.enabled || event.button !== 0 || event.pointerType !== "mouse" || this.settling(event)) return;
       canvas.setPointerCapture(event.pointerId); this.firePointers.add(event.pointerId);
     });
     for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) canvas?.addEventListener(name, event => this.firePointers.delete(event.pointerId));
@@ -66,7 +82,7 @@ export class InputController {
     document.querySelectorAll("[data-touch]").forEach(button => {
       button.addEventListener("pointerdown", event => {
         event.preventDefault();
-        if (!this.enabled) return;
+        if (!this.enabled || this.settling(event)) return;
         if (button.dataset.touch === "shoot") { button.setPointerCapture(event.pointerId); this.firePointers.add(event.pointerId); }
         else this.actions.add(button.dataset.touch);
       });

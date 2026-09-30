@@ -16,7 +16,11 @@ import { Boundary } from "../src/boundary.js";
 import { mapPoint } from "../src/minimap.js";
 import { readFileSync } from "node:fs";
 import { World } from "../src/world.js";
-import { clearPath, moveAgent } from "../src/navigation.js";
+import { clearPath, moveAgent, reachablePoint } from "../src/navigation.js";
+import { BRAWL } from "../src/missions.js";
+import { EXPEDITIONS } from "../src/expedition-data.js";
+import { normalizeSettings } from "../src/rules.js";
+import { InputController } from "../src/input.js";
 
 function harness(progress = createProgress({ settings: { campaignMode: "challenge" } })) {
   const mission = new THREE.Group();
@@ -79,6 +83,7 @@ test("all enemy variants detour around a real Blender prop before winding up", (
     const enemy = game.entities.filter(entity => entity.kind === "enemy")[index];
     Object.assign(enemy, { x: -15.1, z: 1, attackState: "approach" });
     move(game, { x: -10.9, z: 1 });
+    assert.equal(clearPath(enemy, game.player, world.obstacles, enemy.radius), false, "the beach prop must block the straight line");
     let approached = false;
     for (let tick = 0; tick < 15 / dt; tick++) {
       const before = { x: enemy.x, z: enemy.z };
@@ -100,6 +105,7 @@ test("summoned crabs have a footprint and route around solid scenery to help", (
   game.combat.whistles = 1; assert.equal(game.combat.callAnimals(), true);
   for (const animal of game.combat.animals) assert.equal(animal.radius, .45);
   Object.assign(game.combat.animals[0], { x: -15, z: 1 });
+  assert.equal(clearPath(game.combat.animals[0], enemy, world.obstacles, .45), false, "the beach prop must block the crab's straight line");
   for (const animal of game.combat.animals.slice(1)) animal.life = 0;
   for (let tick = 0; tick < 200 && enemy.health === 100; tick++) {
     const before = game.combat.animals.map(a => ({ x: a.x, z: a.z }));
@@ -114,6 +120,7 @@ test("recruited robots use the same safe detour before attacking through scenery
   const [ally, enemy] = game.entities.filter(entity => entity.kind === "enemy");
   Object.assign(ally, { kind: "ally", x: -15.1, z: 1, cooldown: 0, index: 0 });
   Object.assign(enemy, { x: -10.9, z: 1, health: 100, maxHealth: 100 }); game.entities = [ally, enemy];
+  assert.equal(clearPath(ally, enemy, world.obstacles, ally.radius), false, "the beach prop must block the teammate's line of fire");
   game.combat.updateAllies(.05);
   assert.equal(enemy.health, 100, "a blocked teammate must navigate instead of firing through the prop");
   for (let tick = 0; tick < 300 && enemy.health === 100; tick++) {
@@ -142,8 +149,12 @@ test("navigation follows moving targets, overlapping props and the circular aren
 
 test("unreachable destinations are bounded and agents recover when the target moves", () => {
   const obstacles = [{ x: 0, z: 0, radius: 2 }], actor = { x: -4, z: 0, radius: .9 };
-  for (let i = 0; i < 30; i++) moveAgent(actor, { x: 0, z: 0 }, .12, obstacles);
-  assert.deepEqual(actor, { x: -4, z: 0, radius: .9 });
+  for (let i = 0; i < 30; i++) {
+    moveAgent(actor, { x: 0, z: 0 }, .12, obstacles);
+    assert.ok(Math.hypot(actor.x, actor.z) >= 2.9 - 1e-6, "an agent never clips into the prop that hides its target");
+  }
+  // It closes in on the nearest reachable spot instead of freezing where it stood.
+  assert.ok(Math.hypot(actor.x + 2.98, actor.z) < .05, `stopped at (${actor.x.toFixed(2)}, ${actor.z.toFixed(2)})`);
   for (let i = 0; i < 300; i++) moveAgent(actor, { x: 4, z: 0 }, .12, obstacles);
   assert.ok(Math.hypot(actor.x - 4, actor.z) < .01);
 });
@@ -161,12 +172,35 @@ test("relay guidance never loops and a closed loop never reads as solved", () =>
   assert.equal(game.relayState.complete, true);
 });
 
+// Reference optimum, independent of solveRelays: breadth-first search over single clockwise quarter-turns.
+function fewestTurns(positions, turns, receiver) {
+  const start = turns.map(t => t % 4), seen = new Set([start.join()]);
+  let frontier = [start];
+  for (let depth = 0; frontier.length; depth++) {
+    const next = [];
+    for (const state of frontier) {
+      if (traceRelays(positions, state, receiver).complete) return depth;
+      for (let i = 0; i < state.length; i++) {
+        const turned = state.slice(); turned[i] = (turned[i] + 1) % 4;
+        if (!seen.has(turned.join())) { seen.add(turned.join()); next.push(turned); }
+      }
+    }
+    frontier = next;
+  }
+  return Infinity;
+}
+
 test("the relay solver finds the cheapest completing orientation", () => {
-  const stage = findStage("core").stage;
-  const solution = solveRelays(stage.positions, stage.turns, stage.receiver);
-  assert.ok(traceRelays(stage.positions, solution.turns, stage.receiver).complete);
-  assert.equal(solution.cost, solveRelays(stage.positions, stage.turns, stage.receiver).cost);
-  assert.equal(solveRelays(stage.positions, solution.turns, stage.receiver).cost, 0);
+  for (const id of ["trail", "core"]) {
+    const stage = findStage(id).stage;
+    const solution = solveRelays(stage.positions, stage.turns, stage.receiver);
+    assert.ok(traceRelays(stage.positions, solution.turns, stage.receiver).complete);
+    assert.equal(solution.cost, fewestTurns(stage.positions, stage.turns, stage.receiver), `${id}: the solver's cost is the true minimum`);
+    assert.equal(solution.cost, solution.turns.reduce((sum, value, i) => sum + (value - stage.turns[i] + 4) % 4, 0), "the cost counts clockwise turns");
+    // From a scrambled start the solver must still agree with the search.
+    const scrambled = stage.turns.map((t, i) => (t + i + 1) % 4);
+    assert.equal(solveRelays(stage.positions, scrambled, stage.receiver)?.cost ?? Infinity, fewestTurns(stage.positions, scrambled, stage.receiver));
+  }
 });
 
 test("the Floating Observatory cannot be won without the player", () => {
@@ -308,4 +342,114 @@ test("the play space is one circle shared by KAI, enemies, the fence and the rad
   fence.dispose();
   const edge = mapPoint({ x: PLAY_RADIUS, z: 0 }, 0, 160), centre = mapPoint({ x: 0, z: 0 }, 0, 160);
   assert.ok(edge.x - centre.x < 80, "the radar shows the whole play space");
+});
+
+// ---- second review pass: each test pins a defect fixed in the review-pass branch ----
+
+test("enemies reach a player standing in the pocket between a rim prop and the edge", () => {
+  const { world } = harness(); useColliders(world);
+  const prop = { x: 15.79, z: -12.63, radius: .88 }, base = Math.atan2(prop.z, prop.x);
+  let pocket = null;
+  for (let da = 0; da < .2 && !pocket; da += .002) for (const side of [1, -1]) {
+    const a = base + side * da, p = { x: Math.cos(a) * PLAY_RADIUS, z: Math.sin(a) * PLAY_RADIUS };
+    const inside = { x: p.x * (PLAY_RADIUS - .5) / PLAY_RADIUS, z: p.z * (PLAY_RADIUS - .5) / PLAY_RADIUS };
+    if (Math.hypot(p.x - prop.x, p.z - prop.z) >= prop.radius + .9 && !clearPath(inside, inside, world.obstacles, .9)) { pocket = p; break; }
+  }
+  assert.ok(pocket, "the beach still has a pocket to test");
+  const target = reachablePoint(pocket, world.obstacles, .78);
+  assert.ok(clearPath(target, target, world.obstacles, .78), "the reachable point is outside every prop");
+  const agent = { x: 6, z: -3, radius: .78 };
+  for (let tick = 0; tick < 60 * 20; tick++) {
+    const before = { x: agent.x, z: agent.z };
+    moveAgent(agent, pocket, 2.4 / 60, world.obstacles);
+    assert.ok(clearPath(before, agent, world.obstacles, agent.radius));
+  }
+  assert.ok(Math.hypot(agent.x - pocket.x, agent.z - pocket.z) < 1.35, `a scout closes to contact range (${agent.x.toFixed(2)}, ${agent.z.toFixed(2)})`);
+});
+
+test("crab crews spawn and idle inside the play boundary", () => {
+  const { game } = harness(); game.begin(BRAWL);
+  move(game, { x: 0, z: PLAY_RADIUS });
+  const enemy = game.spawnEnemy(false, 0); Object.assign(enemy, { x: 0, z: 12, frozen: 99 });
+  game.combat.whistles = 1; assert.equal(game.combat.callAnimals(), true);
+  for (const animal of game.combat.animals) assert.ok(Math.hypot(animal.x, animal.z) <= PLAY_RADIUS - .5 + 1e-9, "spawned inside");
+  enemy.active = false;
+  for (let tick = 0; tick < 120; tick++) game.combat.updateAllies(1 / 60);
+  for (const animal of game.combat.animals) assert.ok(Math.hypot(animal.x, animal.z) <= PLAY_RADIUS - .5 + 1e-9, "stays inside");
+});
+
+test("pulsing a shielded boss explains the shield instead of reporting no target", () => {
+  const { game, ui } = harness(); game.begin(findStage("captain"));
+  move(game, { x: game.boss.x + 2, z: game.boss.z });
+  const before = ui.messages.length; game.pulse();
+  const said = ui.messages.slice(before);
+  assert.ok(said.some(text => /shield is solid/.test(text)), said.join(" | "));
+  assert.ok(!said.some(text => /No pulse target/.test(text)), said.join(" | "));
+});
+
+test("defense stages start KAI inside the line and fresh spawns cannot hit before they are seen", () => {
+  const { game } = harness(); game.begin(findStage("boardwalk"));
+  assert.deepEqual({ x: game.player.x, z: game.player.z }, { x: 0, z: 5 });
+  for (let t = 0; t < 5 && game.running; t += 1 / 60) game.update(1 / 60);
+  assert.equal(game.metrics.damageTaken, 0, "no hit during the opening seconds");
+  const enemy = game.spawnEnemy(false, 0);
+  assert.ok(enemy.grace > 0, "new robots carry a contact grace");
+});
+
+test("a downed robot beside the clam can be repaired, but carrying a friend still wins", () => {
+  const { game } = harness(); game.begin(EXPEDITIONS[0]);
+  const clam = game.expedition.clam;
+  move(game, { x: clam.x - 1.5, z: clam.z });
+  const bot = game.makeEntity("enemy", "rust_scout", { x: clam.x - 2, z: clam.z }, .8, { variant: "bot", repairable: true, active: false, health: 0, maxHealth: 3 });
+  game.entities.push(bot); game.combat.scrap = 2;
+  const shields = game.shields;
+  game.interact();
+  assert.equal(bot.kind, "ally", "the repair ran");
+  assert.equal(game.combat.scrap, 0);
+  assert.equal(game.shields, shields, "the clam was not used by the same press");
+  const other = game.makeEntity("enemy", "rust_scout", { x: clam.x - 2, z: clam.z + .5 }, .8, { variant: "bot", repairable: true, active: false, health: 0, maxHealth: 3 });
+  game.entities.push(other); game.combat.scrap = 2; game.carry = { id: "friend" };
+  assert.equal(game.expedition.urgent(), true, "carrying makes the expedition action urgent");
+});
+
+test("the x-ray silhouette is idempotent and never writes stencil state into shared model materials", () => {
+  const shared = new THREE.MeshStandardMaterial({ name: "Shared" });
+  const own = new THREE.MeshStandardMaterial({ name: "Private" });
+  const actor = new THREE.Group();
+  actor.add(new THREE.Mesh(new THREE.BoxGeometry(), shared), new THREE.Mesh(new THREE.BoxGeometry(), own));
+  const world = { assetResources: new Set([shared]) };
+  World.prototype.addSilhouette.call(world, actor);
+  World.prototype.addSilhouette.call(world, actor);
+  let ghosts = 0; actor.traverse(o => { if (o.userData.silhouette) ghosts++; });
+  assert.equal(ghosts, 2, "one ghost per mesh, even when refreshed");
+  assert.equal(shared.stencilWrite, false, "the cached material stays untouched");
+  const [a, b] = actor.children;
+  assert.notEqual(a.material, shared); assert.equal(a.material.stencilWrite, true);
+  assert.equal(b.material, own, "private materials are updated in place, not cloned again");
+  assert.notEqual(a.userData.ghost.material, b.userData.ghost.material, "each ghost owns its material");
+});
+
+test("saved settings are validated and keep unknown future keys", () => {
+  assert.deepEqual(normalizeSettings({ quality: "ultra", reducedMotion: "yes", sound: 0, campaignMode: "hard" }),
+    { quality: "auto", reducedMotion: false, sound: true, campaignMode: "story" });
+  const kept = normalizeSettings({ quality: "medium", reducedMotion: true, sound: false, campaignMode: "challenge", language: "vi" });
+  assert.deepEqual(kept, { quality: "medium", reducedMotion: true, sound: false, campaignMode: "challenge", language: "vi" });
+  assert.equal(createProgress({ settings: [] }).settings.quality, "auto");
+});
+
+test("pointer presses that belong to the tap which started play are ignored", () => {
+  const originalWindow = globalThis.window, originalDocument = globalThis.document;
+  globalThis.window = { addEventListener() {} };
+  globalThis.document = { querySelector: () => null, querySelectorAll: () => [] };
+  try {
+    const input = new InputController();
+    input.enabled = true;
+    assert.equal(input.settling({ timeStamp: input.enabledAt + 100 }), true);
+    assert.equal(input.settling({ timeStamp: input.enabledAt + 400 }), false);
+    const first = input.enabledAt; input.enabled = true;
+    assert.equal(input.enabledAt, first, "re-enabling while enabled does not restart the grace");
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window; else globalThis.window = originalWindow;
+    if (originalDocument === undefined) delete globalThis.document; else globalThis.document = originalDocument;
+  }
 });

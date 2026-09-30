@@ -35,6 +35,10 @@ export class World {
     this.softwareRenderer = isSoftwareRenderer(this.renderer);
     this.sunOffset = new THREE.Vector3(0, 1, 0);
     this.shadowFocus = new THREE.Vector3();
+    this.lightForward = new THREE.Vector3(); this.lightRight = new THREE.Vector3(); this.lightUp = new THREE.Vector3();
+    this.boltHome = new THREE.Vector3(-3, 0.55, -4);
+    // A restored WebGL context loses the rendered reflection map; bake it again on the next frame.
+    canvas.addEventListener("webglcontextrestored", () => { this.environmentDirty = true; });
     this.models = new Map();
     this.expectedModelCount = MODEL_NAMES.length + JOURNEY_MODEL_NAMES.length;
     this.assetResources = new Set();
@@ -91,7 +95,10 @@ export class World {
         const gltf = await loader.loadAsync(`./models/${name}.glb${versions[name] ? `?v=${encodeURIComponent(versions[name])}` : ""}`);
         this.models.set(name, gltf.scene);
         // Collision footprints travel inside the environment GLB (glTF extras), so they never depend on the manifest.
-        gltf.scene.traverse(object => { if (typeof object.userData.colliders === "string") this.colliders.set(name, JSON.parse(object.userData.colliders)); });
+        gltf.scene.traverse(object => {
+          if (typeof object.userData.colliders !== "string") return;
+          try { this.colliders.set(name, JSON.parse(object.userData.colliders)); } catch { console.warn(`Ignoring malformed collision data in ${name}`); }
+        });
       } catch {
         this.failedModels.push(name);
         this.models.set(name, this.fallback(name));
@@ -105,6 +112,7 @@ export class World {
     }));
     const journey = { sand: metric(this.surfaces.sand), wood: metric(this.surfaces.wood), water: metric(this.surfaces.water) };
     this.journeyWater = journey.water.normalMap;
+    this.draco.dispose();
     for (const model of this.models.values()) model.traverse(child => {
       if (child.geometry) this.assetResources.add(child.geometry);
       for (const material of child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : []) {
@@ -433,23 +441,33 @@ export class World {
     return !ray.intersectObjects(scenery, true).some(hit => hit.object.isMesh && !hit.object.material?.transparent && !/^Journey (Glow|Water|Cloud)/.test(hit.object.material?.name || ""));
   }
 
+  // Idempotent: call again after attachments change; only meshes without a ghost are processed.
   addSilhouette(actor, color = 0x6fdcff) {
-    // Visible pixels of the actor mark the stencil; the ghost draws only where the actor is hidden.
-    const ghost = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .5, depthWrite: false, depthFunc: THREE.GreaterDepth, fog: false,
-      stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp });
     const meshes = [];
-    actor.traverse(child => { if (child.isMesh && !child.userData.silhouette && !child.material?.transparent) meshes.push(child); });
+    actor.traverse(child => { if (child.isMesh && !child.userData.silhouette && !child.userData.ghost && !child.material?.transparent) meshes.push(child); });
     for (const mesh of meshes) {
       // Draw after all opaque scenery: an occluder drawn later would hide pixels already marked visible.
       mesh.renderOrder = 2;
+      // Stencil state lives on a private copy: cached model materials are shared with BOLT and menus.
+      // Materials that are already private (paint clones, weapon gear) are updated in place.
+      const shared = material => this.assetResources.has(material);
+      if (Array.isArray(mesh.material) ? mesh.material.some(shared) : shared(mesh.material)) {
+        mesh.material = Array.isArray(mesh.material) ? mesh.material.map(material => shared(material) ? material.clone() : material) : mesh.material.clone();
+      }
+      mesh.userData.ownedStencil = true;
       for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
         Object.assign(material, { stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp });
       }
-      const shadow = new THREE.Mesh(mesh.geometry, ghost);
-      shadow.userData.silhouette = true;
-      shadow.renderOrder = 6;
-      shadow.castShadow = shadow.receiveShadow = false;
-      mesh.add(shadow);
+      // Visible pixels mark the stencil; a ghost draws only where the actor is hidden, and marks the
+      // pixel too, so overlapping hidden parts read as one flat silhouette instead of stacked layers.
+      // Each ghost owns its material, so releasing one attachment never disposes the others' ghosts.
+      const ghost = new THREE.Mesh(mesh.geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .5, depthWrite: false, depthFunc: THREE.GreaterDepth, fog: false,
+        stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.ReplaceStencilOp }));
+      ghost.userData.silhouette = true;
+      ghost.renderOrder = 6;
+      ghost.castShadow = ghost.receiveShadow = false;
+      mesh.userData.ghost = ghost;
+      mesh.add(ghost);
     }
   }
 
@@ -587,6 +605,7 @@ export class World {
     this.renderer.shadowMap.enabled = profile.shadows;
     if (this.sun) {
       this.sun.castShadow = profile.shadows;
+      if (!profile.shadows && this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
       if (profile.shadows && this.sun.shadow.mapSize.x !== profile.shadowMap) {
         this.sun.shadow.mapSize.set(profile.shadowMap, profile.shadowMap);
         this.sun.shadow.map?.dispose();
@@ -598,6 +617,10 @@ export class World {
   }
 
   resize() {
+    // 'auto' follows rotation and window changes; an explicit choice never changes by itself.
+    if (this.settings.quality === "auto" && this.quality && resolveQuality("auto", innerWidth, this.softwareRenderer) !== this.quality) return this.setQuality("auto");
+    const ratio = Math.min(devicePixelRatio, QUALITY_PROFILES[this.quality || "low"].pixelRatio);
+    if (this.renderer.getPixelRatio() !== ratio) this.renderer.setPixelRatio(ratio);
     const width = Math.max(1, this.canvas.clientWidth || innerWidth);
     const height = Math.max(1, this.canvas.clientHeight || innerHeight);
     this.camera.aspect = width / height;
@@ -648,7 +671,7 @@ export class World {
         bolt.position.y = 0.55 + Math.abs(Math.sin(this.clock * 9)) * 0.06;
       }
       this.animateActor(bolt, this.clock, d > 2.8);
-    } else if (bolt && !focus) bolt.position.lerp(new THREE.Vector3(-3, 0.55, -4), 1 - Math.exp(-dt * 2));
+    } else if (bolt && !focus) bolt.position.lerp(this.boltHome, 1 - Math.exp(-dt * 2));
     if (this.journeyParticles && !reducedMotion) this.journeyParticles.position.y = Math.sin(this.clock*.3)*.25;
     if (this.journeyPlanet && !reducedMotion) {
       this.journeyPlanet.rotation.y += dt * .01;
@@ -705,9 +728,9 @@ export class World {
     // Snap the shadow frustum to whole texels so shadows do not shimmer while the camera glides.
     const size = this.sun.shadow.camera.right - this.sun.shadow.camera.left;
     const texel = size / Math.max(1, this.sun.shadow.mapSize.x);
-    const forward = this.sunOffset.clone().normalize();
-    const right = new THREE.Vector3(0, 1, 0).cross(forward).normalize();
-    const up = forward.clone().cross(right);
+    const forward = this.lightForward.copy(this.sunOffset).normalize();
+    const right = this.lightRight.set(0, 1, 0).cross(forward).normalize();
+    const up = this.lightUp.copy(forward).cross(right);
     const focus = this.cameraTarget;
     const r = Math.round(focus.dot(right) / texel) * texel, u = Math.round(focus.dot(up) / texel) * texel;
     this.shadowFocus.copy(right).multiplyScalar(r).addScaledVector(up, u).addScaledVector(forward, focus.dot(forward));

@@ -7,6 +7,10 @@ const aimHeight = entity => actorHeight(entity.object, entity.variant === "drone
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const hostile = entity => entity.active && ["enemy", "boss"].includes(entity.kind);
+const clampToPlay = agent => {
+  const radius = Math.hypot(agent.x, agent.z), limit = PLAY_RADIUS - .5;
+  if (radius > limit) { agent.x *= limit / radius; agent.z *= limit / radius; }
+};
 export const WEAPONS = {
   bubble: { name: "Bubble Blaster", ammo: 36, range: 14, cooldown: 0.24, damage: 1, color: 0x5ce5ff },
   arc: { name: "Arc Fork", ammo: 18, range: 11, cooldown: 0.6, damage: 2, color: 0xc99bff },
@@ -110,6 +114,7 @@ export class Combat {
     barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.18, 0.32);
     this.gear.add(grip, barrel); this.gear.position.set(-0.68, 1.18, 0.3);
     this.game.player.object.add(this.gear);
+    this.game.world.addSilhouette?.(this.game.player.object);
   }
 
   update(dt) {
@@ -192,10 +197,13 @@ export class Combat {
         shot.object.position.set(shot.x, shot.y, shot.z);
         // Swept collision prevents fast bullets skipping small dogs and drones.
         const dx = shot.x - oldX, dz = shot.z - oldZ;
-        const hit = this.enemies().map(enemy => {
+        let hit = null;
+        for (const enemy of this.game.entities) {
+          if (!hostile(enemy)) continue;
           const t = Math.max(0, Math.min(1, ((enemy.x - oldX) * dx + (enemy.z - oldZ) * dz) / (dx * dx + dz * dz || 1)));
-          return { enemy, t, d: Math.hypot(enemy.x - oldX - t * dx, enemy.z - oldZ - t * dz) };
-        }).filter(hit => hit.d < (hit.enemy.boss ? 1.3 : 0.85)).sort((a, b) => a.t - b.t)[0];
+          const d = Math.hypot(enemy.x - oldX - t * dx, enemy.z - oldZ - t * dz);
+          if (d < (enemy.boss ? 1.3 : 0.85) && (!hit || t < hit.t)) hit = { enemy, t };
+        }
         // The swept hit may be behind the new bullet position; momentum still follows velocity.
         if (hit) { this.hit(hit.enemy, shot.damage, shot, { x: shot.vx, z: shot.vz }); shot.life = 0; }
       }
@@ -250,7 +258,9 @@ export class Combat {
     if (!attackingPlayer) approach();
     else if (enemy.attackState === "approach") {
       const range = enemy.variant === "dog" ? 5 : enemy.variant === "drone" ? 7 : 1.8;
-      if (d > range || !clearPath(enemy, target, g.world.obstacles, enemy.radius)) approach();
+      // Lunges from range need a clear lane (never charge into a wall). At touching distance both
+      // bodies are already outside every prop, so a lane grazing a rock KAI leans on cannot block.
+      if (d > range || d > 1.2 && !clearPath(enemy, target, g.world.obstacles, enemy.radius)) approach();
       else {
         enemy.attackState = "windup";
         enemy.attackTime = enemy.variant === "drone" ? 0.85 : enemy.variant === "dog" ? 0.65 : 0.4;
@@ -316,6 +326,7 @@ export class Combat {
       const object = this.game.world.createActor("crab", p, 1);
       this.game.cloneMaterials(object); this.game.tint(object, 0xffc75f, 0.3);
       const animal = { ...p, object, radius: .45, cooldown: 0, animal: true, index: i };
+      clampToPlay(animal);
       this.game.world.constrainPlayer?.(animal);
       object.position.x = animal.x; object.position.z = animal.z;
       this.animals.push(animal);
@@ -378,6 +389,7 @@ export class Combat {
         const step = Math.min(d, dt * (ally.animal ? 5.2 : 4));
         moveAgent(ally, destination, step, this.game.world.obstacles);
       }
+      clampToPlay(ally);
       this.game.world.constrainPlayer?.(ally);
       ally.object.position.set(ally.x, ally.variant === "drone" ? 1.8 : 0.55 + (ally.animal ? Math.abs(Math.sin(this.game.elapsed * 12)) * 0.15 : 0), ally.z);
       ally.object.rotation.y = Math.atan2(destination.x - ally.x, destination.z - ally.z);

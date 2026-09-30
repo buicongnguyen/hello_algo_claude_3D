@@ -65,6 +65,7 @@ class SceneMSAAPass extends Pass {
   render(renderer, writeBuffer, readBuffer) {
     renderer.setRenderTarget(this.target);
     renderer.clear();
+    renderer.shadowMap.needsUpdate = true;
     renderer.render(this.scene, this.camera);
     this.onRendered();
     this.copy.material.uniforms.tDiffuse.value = this.target.texture;
@@ -89,13 +90,17 @@ export class RenderPipeline {
     // Scene cost (shadow map + main view) is tracked apart from the post-processing passes.
     this.sceneStats = { calls: 0, triangles: 0 };
     renderer.info.autoReset = false;
+    // Shadows are refreshed explicitly once per frame by the scene render (see SceneMSAAPass).
+    renderer.shadowMap.autoUpdate = false;
   }
 
   configure(level) {
     this.level = level;
     this.profile = QUALITY_PROFILES[level] || QUALITY_PROFILES.low;
     this.disposeComposer();
-    if (!this.profile.post || !this.renderer.capabilities.isWebGL2) return;
+    const extensions = this.renderer.extensions;
+    const floatTargets = extensions.has("EXT_color_buffer_float") || extensions.has("EXT_color_buffer_half_float");
+    if (!this.profile.post || !this.renderer.capabilities.isWebGL2 || !floatTargets) return;
     // EffectComposer treats a supplied target's size as CSS pixels; setSize() below applies the pixel ratio.
     const size = this.renderer.getSize(new THREE.Vector2());
     const target = new THREE.WebGLRenderTarget(Math.max(1, size.x), Math.max(1, size.y), { type: THREE.HalfFloatType });
@@ -154,14 +159,13 @@ export class RenderPipeline {
   render() {
     this.renderer.info.reset();
     if (this.composer) this.composer.render();
-    else { this.renderer.render(this.scene, this.camera); this.recordScene(); }
+    else { this.renderer.shadowMap.needsUpdate = true; this.renderer.render(this.scene, this.camera); this.recordScene(); }
   }
 
   disposeComposer() {
     if (!this.composer) return;
     for (const pass of this.composer.passes) pass.dispose?.();
-    this.composer.renderTarget1.dispose();
-    this.composer.renderTarget2.dispose();
+    this.composer.dispose();
     this.composer = this.bloom = this.ao = this.grade = null;
   }
 }

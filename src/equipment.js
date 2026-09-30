@@ -44,16 +44,6 @@ export function equipmentStats(base, equipment, arcade = false) {
 
 export function dressRobot(world, actor, equipment) {
   const paint = PAINTS[equipment.paint] || PAINTS.lagoon;
-  // Clone just once: the cached Blender material must never be recolored globally.
-  actor.traverse(child => {
-    if (!child.isMesh || !child.material?.name) return;
-    const name = child.material.name;
-    if (!name.startsWith("Ceramic White") && !name.startsWith("Aurora Cyan")) return;
-    if (!child.userData.ownedPaint) { child.material = child.material.clone(); child.userData.ownedPaint = true; }
-    const color = name.startsWith("Ceramic") ? paint.shell : paint.accent;
-    child.material.color.setHex(color);
-    if (name.startsWith("Aurora") && child.material.emissive) child.material.emissive.setHex(color);
-  });
   for (const part of actor.userData.attachments || []) world.release(part);
   actor.userData.attachments = [];
   for (const slot of ["body", "back", "head"]) {
@@ -64,4 +54,16 @@ export function dressRobot(world, actor, equipment) {
     part.userData.equipmentSlot = slot;
     actor.userData.attachments.push(part);
   }
+  // Paint last, so attachment accents match the robot. Clone just once: the cached Blender
+  // material must never be recolored globally.
+  actor.traverse(child => {
+    if (!child.isMesh || !child.material?.name) return;
+    const name = child.material.name;
+    if (!name.startsWith("Ceramic White") && !name.startsWith("Aurora Cyan")) return;
+    if (!child.userData.ownedPaint && !child.userData.ownedStencil) child.material = child.material.clone();
+    child.userData.ownedPaint = true;
+    const color = name.startsWith("Ceramic") ? paint.shell : paint.accent;
+    child.material.color.setHex(color);
+    if (name.startsWith("Aurora") && child.material.emissive) child.material.emissive.setHex(color);
+  });
 }

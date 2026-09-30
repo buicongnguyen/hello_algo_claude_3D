@@ -28,6 +28,8 @@ const fenceFragment = /* glsl */`
     float fade = (1.0 - vHeight) * smoothstep(0.0, 0.06, vHeight);
     float alpha = near * proximity * fade * (0.18 + 0.82 * grid);
     gl_FragColor = vec4(color * alpha * 1.6, alpha);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }`;
 
 const ringFragment = /* glsl */`
@@ -42,6 +44,8 @@ const ringFragment = /* glsl */`
     float near = 1.0 - smoothstep(1.0, 9.0, distance(vWorld.xz, player));
     float alpha = dash * (0.3 + near * proximity * 0.6);
     gl_FragColor = vec4(color * alpha * 1.4, alpha);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }`;
 
 export class Boundary {

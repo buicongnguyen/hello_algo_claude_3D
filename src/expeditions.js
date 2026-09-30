@@ -135,6 +135,12 @@ export class Expedition {
   taskComplete() { return this.mode === "rescue" ? this.rescued === 3 : this.mode === "salvage" ? this.discs === 3 : this.checkpoint === 3; }
   ready() { return this.taskComplete() && this.patrolsClear(); }
 
+  // Carrying or lifting a friend, or finishing, outranks repairing a downed robot; the clam does not.
+  urgent() {
+    const g = this.game;
+    return Boolean(g.carry) || this.friends.some(f => f.active && distance(g.player, f) < 2.5) || distance(g.player, this.exit) < 2.5 && this.ready();
+  }
+
   interact() {
     const g = this.game;
     if (g.carry) {

@@ -6,8 +6,8 @@
     {
       "name": "journey_city",
       "file": "journey_city.glb",
-      "bytes": 498636,
-      "sha256": "4f00b70671639f32",
+      "bytes": 498984,
+      "sha256": "eb458185755bcced",
       "triangles": 66134,
       "meshes": 15,
       "colliders": [
@@ -116,8 +116,8 @@
     {
       "name": "journey_country",
       "file": "journey_country.glb",
-      "bytes": 368320,
-      "sha256": "d4396a8cd95bd249",
+      "bytes": 368304,
+      "sha256": "605ab316198cca0f",
       "triangles": 38454,
       "meshes": 12,
       "colliders": [
@@ -136,8 +136,8 @@
     {
       "name": "journey_beach",
       "file": "journey_beach.glb",
-      "bytes": 224244,
-      "sha256": "c3ebaa5497162d7c",
+      "bytes": 224576,
+      "sha256": "b8bd5a0da8e6337d",
       "triangles": 28635,
       "meshes": 16,
       "colliders": [
@@ -161,8 +161,8 @@
     {
       "name": "journey_reef",
       "file": "journey_reef.glb",
-      "bytes": 479744,
-      "sha256": "6c67b453dcda13bd",
+      "bytes": 479992,
+      "sha256": "f09784760e855869",
       "triangles": 50756,
       "meshes": 6,
       "colliders": [
@@ -216,8 +216,8 @@
     {
       "name": "journey_wreck",
       "file": "journey_wreck.glb",
-      "bytes": 259824,
-      "sha256": "2f53cbdfd65ee902",
+      "bytes": 259812,
+      "sha256": "b8c3c3eca083bdde",
       "triangles": 29038,
       "meshes": 8,
       "colliders": [
@@ -261,8 +261,8 @@
     {
       "name": "journey_abyss",
       "file": "journey_abyss.glb",
-      "bytes": 298320,
-      "sha256": "40af8cbaf03bf210",
+      "bytes": 298776,
+      "sha256": "bdd173aa10da5ea5",
       "triangles": 29880,
       "meshes": 9,
       "colliders": [
@@ -316,8 +316,8 @@
     {
       "name": "journey_platform",
       "file": "journey_platform.glb",
-      "bytes": 145488,
-      "sha256": "a473cbf733bf982c",
+      "bytes": 145704,
+      "sha256": "101be566a5dbe14c",
       "triangles": 22640,
       "meshes": 13,
       "colliders": [
@@ -406,8 +406,8 @@
     {
       "name": "journey_atolls",
       "file": "journey_atolls.glb",
-      "bytes": 175440,
-      "sha256": "7a29e361ac669a20",
+      "bytes": 175512,
+      "sha256": "053a14ddaf58ca65",
       "triangles": 26116,
       "meshes": 11,
       "colliders": [
@@ -421,8 +421,8 @@
     {
       "name": "journey_stormsky",
       "file": "journey_stormsky.glb",
-      "bytes": 331104,
-      "sha256": "af542e3a21261a05",
+      "bytes": 331152,
+      "sha256": "6c9e1a245dbacb07",
       "triangles": 18820,
       "meshes": 4,
       "colliders": []
@@ -430,8 +430,8 @@
     {
       "name": "journey_highsky",
       "file": "journey_highsky.glb",
-      "bytes": 332232,
-      "sha256": "7bacd7f65ce137c1",
+      "bytes": 332272,
+      "sha256": "37a98857a035c11d",
       "triangles": 18836,
       "meshes": 5,
       "colliders": []
@@ -439,17 +439,17 @@
     {
       "name": "journey_orbit",
       "file": "journey_orbit.glb",
-      "bytes": 211708,
-      "sha256": "022d473b31517b7a",
-      "triangles": 18000,
+      "bytes": 224360,
+      "sha256": "e5c42adc2d89021e",
+      "triangles": 19344,
       "meshes": 7,
       "colliders": []
     },
     {
       "name": "journey_moonplain",
       "file": "journey_moonplain.glb",
-      "bytes": 132696,
-      "sha256": "18942f0480022dc5",
+      "bytes": 132804,
+      "sha256": "d825b177dc7638c2",
       "triangles": 22236,
       "meshes": 9,
       "colliders": [
@@ -483,8 +483,8 @@
     {
       "name": "journey_crater",
       "file": "journey_crater.glb",
-      "bytes": 136328,
-      "sha256": "560d24b5236e79e4",
+      "bytes": 136380,
+      "sha256": "3e8f08607a5e850f",
       "triangles": 22528,
       "meshes": 8,
       "colliders": [
@@ -518,8 +518,8 @@
     {
       "name": "journey_observatory",
       "file": "journey_observatory.glb",
-      "bytes": 133116,
-      "sha256": "62b2e9d4bd609738",
+      "bytes": 133272,
+      "sha256": "cc850286d6a8727b",
       "triangles": 22206,
       "meshes": 7,
       "colliders": [
@@ -558,9 +558,9 @@
     {
       "name": "journey_home",
       "file": "journey_home.glb",
-      "bytes": 589684,
-      "sha256": "4249e952a32c4c6a",
-      "triangles": 71922,
+      "bytes": 587200,
+      "sha256": "bdaa0e1ff4a9b913",
+      "triangles": 71602,
       "meshes": 16,
       "colliders": [
         [
@@ -788,16 +788,16 @@
     {
       "name": "journey_glass",
       "file": "journey_glass.glb",
-      "bytes": 7012,
-      "sha256": "2b474756d6a83998",
+      "bytes": 7032,
+      "sha256": "fe798232c5f607eb",
       "triangles": 150,
       "meshes": 3
     },
     {
       "name": "journey_basalt",
       "file": "journey_basalt.glb",
-      "bytes": 10924,
-      "sha256": "7e88013eb6f388d5",
+      "bytes": 10928,
+      "sha256": "fe6a049678c6604c",
       "triangles": 488,
       "meshes": 1
     }

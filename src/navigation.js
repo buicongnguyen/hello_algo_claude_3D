@@ -82,10 +82,48 @@ function nearbyNodes(grid, point) {
   return result;
 }
 
+// The nearest point an agent of `radius` can actually stand on: outside every prop, inside the edge.
+export function reachablePoint(point, obstacles = EMPTY, radius = .9, limit = PLAY_RADIUS - .5, toward = null) {
+  let x = point.x, z = point.z;
+  for (let pass = 0; pass < 4; pass++) {
+    let moved = false;
+    for (const obstacle of obstacles) {
+      const dx = x - obstacle.x, dz = z - obstacle.z, d = Math.hypot(dx, dz), r = obstacle.radius + radius + CLEARANCE * 2;
+      if (d >= r) continue;
+      if (d > 1e-6) { x = obstacle.x + dx / d * r; z = obstacle.z + dz / d * r; }
+      else {
+        // Exactly at a prop's centre: leave on the side facing the agent (or the play-space centre).
+        const ax = (toward ? toward.x : 0) - obstacle.x, az = (toward ? toward.z : 0) - obstacle.z, out = Math.hypot(ax, az);
+        x = obstacle.x + (out > 1e-6 ? ax / out : 1) * r; z = obstacle.z + (out > 1e-6 ? az / out : 0) * r;
+      }
+      moved = true;
+    }
+    const length = Math.hypot(x, z);
+    if (length > limit) { x *= limit / length; z *= limit / length; moved = true; }
+    if (!moved) break;
+  }
+  return { x, z };
+}
+
 function findRoute(from, target, obstacles, radius, limit) {
   const grid = gridFor(obstacles, radius, limit);
-  const goals = new Set(nearbyNodes(grid, target));
-  if (!goals.size) return [];
+  let goals = new Set(nearbyNodes(grid, target));
+  let end = { x: target.x, z: target.z };
+  if (!goals.size) {
+    // Pinned between a prop and the edge: settle for the closest valid node instead of standing still.
+    const col = Math.round(target.x / CELL) + grid.half, row = Math.round(target.z / CELL) + grid.half;
+    let best = -1, bestDistance = Infinity;
+    for (let z = Math.max(0, row - 3); z <= Math.min(grid.width - 1, row + 3); z++) {
+      for (let x = Math.max(0, col - 3); x <= Math.min(grid.width - 1, col + 3); x++) {
+        const id = z * grid.width + x, node = grid.nodes[id];
+        const d = Math.hypot(node.x - target.x, node.z - target.z);
+        if (grid.valid[id] && d < bestDistance) { best = id; bestDistance = d; }
+      }
+    }
+    if (best < 0) return [];
+    goals = new Set([best]);
+    end = grid.nodes[best];
+  }
   const costs = new Float64Array(grid.nodes.length).fill(Infinity), previous = new Int32Array(grid.nodes.length).fill(-1);
   const closed = new Uint8Array(grid.nodes.length), open = new MinHeap();
   const estimate = id => Math.hypot(grid.nodes[id].x - target.x, grid.nodes[id].z - target.z);
@@ -97,7 +135,7 @@ function findRoute(from, target, obstacles, radius, limit) {
     const { id } = open.pop();
     if (closed[id]) continue;
     if (goals.has(id)) {
-      const path = [{ x: target.x, z: target.z }];
+      const path = [{ x: end.x, z: end.z }];
       for (let node = id; node !== -1; node = previous[node]) path.push(grid.nodes[node]);
       return path.reverse();
     }
@@ -117,8 +155,8 @@ function findRoute(from, target, obstacles, radius, limit) {
 // per-agent routes are reused until the target moves, the route is blocked, or its budget expires.
 export function moveAgent(agent, target, step, obstacles = EMPTY, limit = PLAY_RADIUS - .5) {
   if (step <= 0) return;
-  const radius = agent.radius ?? .9, length = Math.hypot(target.x, target.z);
-  const destination = length > limit ? { x: target.x * limit / length, z: target.z * limit / length } : target;
+  const radius = agent.radius ?? .9;
+  const destination = reachablePoint(target, obstacles, radius, limit, agent);
   let next = destination;
   if (!clearPath(agent, destination, obstacles, radius)) {
     let route = routes.get(agent);

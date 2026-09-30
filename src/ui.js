@@ -18,6 +18,7 @@ export class UI {
     this.screens = ["loading", "titleScreen", "mapScreen", "briefing", "expeditionScreen", "workshopScreen"];
     this.minimap = new Minimap(document.querySelector("#minimap"));
     this.hud = document.querySelector("#hud");
+    this.toast = document.querySelector("#message");
     this.touch = document.querySelector("#touchControls");
     this.cache = {};
     this.messageTimer = 0;
@@ -34,7 +35,7 @@ export class UI {
       this.callbacks.settings({ campaignMode: event.target.value });
       this.showBriefing(this.selected);
     });
-    document.querySelector("#nextDialogue").addEventListener("click", () => this.advanceDialogue());
+    document.querySelector("#nextDialogue").addEventListener("click", event => { if (event.detail) event.currentTarget.blur(); this.advanceDialogue(); });
     document.querySelector("#expeditionsButton").addEventListener("click", () => this.showExpeditions());
     document.querySelector("#workshopButton").addEventListener("click", () => this.showWorkshop());
     document.querySelector("#expeditionWorkshop").addEventListener("click", () => this.showWorkshop());
@@ -53,16 +54,37 @@ export class UI {
     document.addEventListener("keydown", event => {
       if (event.repeat && event.target.closest?.("#modal, #celebration")) event.preventDefault();
     }, true);
-    document.querySelector("#howButton").addEventListener("click", () => document.querySelector("#helpPanel").classList.remove("hidden"));
-    document.querySelector("#closeHelp").addEventListener("click", () => document.querySelector("#helpPanel").classList.add("hidden"));
+    document.querySelector("#howButton").addEventListener("click", () => this.showHelp());
+    document.querySelector("#closeHelp").addEventListener("click", () => this.hideHelp());
+    // Escape closes the manual, or resumes from a pause menu. Stopping here keeps the same key press
+    // from reaching gameplay input, which would pause again on the next frame.
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Escape" || event.repeat) return;
+      if (!document.querySelector("#helpPanel").classList.contains("hidden")) { event.stopPropagation(); this.hideHelp(); return; }
+      const modal = document.querySelector("#modal");
+      if (!modal.classList.contains("hidden") && this.dismiss) { event.stopPropagation(); const run = this.dismiss; modal.classList.add("hidden"); this.dismiss = null; run(); }
+    });
+    // While any dialog is open, everything behind it is inert: Tab and clicks cannot reach the HUD or menus.
+    const dialogs = ["#modal", "#celebration", "#helpPanel"].map(selector => document.querySelector(selector));
+    const syncInert = () => {
+      const open = dialogs.find(dialog => !dialog.classList.contains("hidden"));
+      for (const element of document.querySelector("#app").children) {
+        if (element === this.toast) continue;
+        element.inert = Boolean(open) && element !== open;
+      }
+    };
+    this.syncInert = syncInert; // also called directly before focusing a dialog, since observers run late
+    const observer = new MutationObserver(syncInert);
+    for (const dialog of dialogs) observer.observe(dialog, { attributes: true, attributeFilter: ["class"] });
+    this.applyMotion(this.progress.settings.reducedMotion);
     document.querySelector("#resetButton").addEventListener("click", () => this.callbacks.reset());
-    document.querySelector("#quality").value = this.progress.settings.quality;
+    document.querySelector("#quality").value = this.progress.settings.quality || "auto";
     document.querySelector("#quality").addEventListener("change", event => this.callbacks.settings({ quality: event.target.value }));
     document.querySelector("#reducedMotion").checked = this.progress.settings.reducedMotion;
-    document.querySelector("#reducedMotion").addEventListener("change", event => this.callbacks.settings({ reducedMotion: event.target.checked }));
+    document.querySelector("#reducedMotion").addEventListener("change", event => { this.applyMotion(event.target.checked); this.callbacks.settings({ reducedMotion: event.target.checked }); });
     document.querySelector("#soundEnabled").checked = this.progress.settings.sound !== false;
     document.querySelector("#soundEnabled").addEventListener("change", event => this.callbacks.settings({ sound: event.target.checked }));
-    document.querySelector("#skipDialogue").addEventListener("click", () => this.hideDialogue());
+    document.querySelector("#skipDialogue").addEventListener("click", event => { if (event.detail) event.currentTarget.blur(); this.hideDialogue(); });
   }
 
   setProgress(progress) {
@@ -75,9 +97,31 @@ export class UI {
     document.querySelector("#loadStatus").textContent = amount >= 1 ? "Island ready" : `Loading ${label.replaceAll("_", " ")}…`;
   }
 
+  showHelp() {
+    this.helpReturn = document.activeElement;
+    document.querySelector("#helpPanel").classList.remove("hidden");
+    this.syncInert();
+    document.querySelector("#closeHelp").focus();
+  }
+  hideHelp() {
+    const panel = document.querySelector("#helpPanel");
+    if (panel.classList.contains("hidden")) return;
+    panel.classList.add("hidden");
+    this.syncInert();
+    const back = this.helpReturn; this.helpReturn = null;
+    if (back?.isConnected && back.getClientRects().length) back.focus();
+  }
+  // CSS follows the in-game setting; html.motion-ok overrides an OS preference the player turned off.
+  applyMotion(reduced) {
+    const root = document.documentElement;
+    root.classList.toggle("reduced-motion", Boolean(reduced));
+    root.classList.toggle("motion-ok", !reduced);
+  }
   showOnly(id) {
     this.hideCelebration();
     this.hideDialogue();
+    this.hideHelp();
+    this.toast.classList.remove("combat-active");
     if (id !== "workshopScreen") this.callbacks.preview?.(false);
     this.screens.forEach(screen => document.querySelector(`#${screen}`).classList.toggle("hidden", screen !== id));
     this.hud.classList.add("hidden");
@@ -198,6 +242,7 @@ export class UI {
 
   showGame(item) {
     this.hideCelebration();
+    this.hideHelp();
     document.querySelector("#modal").classList.add("hidden");
     this.screens.forEach(screen => document.querySelector(`#${screen}`).classList.add("hidden"));
     this.hud.classList.remove("hidden");
@@ -221,6 +266,7 @@ export class UI {
     document.querySelector("#combatPanel").classList.toggle("hidden", !active);
     this.hud.classList.toggle("combat-active", active);
     this.touch.classList.toggle("combat-active", active);
+    this.toast.classList.toggle("combat-active", active);
     if (active) {
       this.write("weaponName", combat.weapon === "arc" ? "Arc Fork" : combat.weapon ? "Bubble Blaster" : "Find a weapon crate");
       this.write("weaponAmmo", combat.weapon ? `${combat.ammo} shots · ${matchMedia("(pointer: coarse)").matches ? "hold Fire" : "hold J / mouse"}` : "Walk over a glowing crate");
@@ -269,7 +315,7 @@ export class UI {
     if (this.lastMessage === text && performance.now() - this.lastMessageTime < 1600) return;
     this.lastMessage = text; this.lastMessageTime = performance.now();
     this.callbacks.sound?.(bad ? "warning" : "note");
-    const element = document.querySelector("#message");
+    const element = this.toast;
     clearTimeout(this.messageTimer);
     element.textContent = text;
     element.classList.toggle("bad", bad);
@@ -279,6 +325,14 @@ export class UI {
 
   dialogueSnapshot() {
     return this.dialogueLines?.length ? { lines: this.dialogueLines, index: this.dialogueIndex, done: this.dialogueDone } : null;
+  }
+
+  suspendDialogue() {
+    const snapshot = this.dialogueSnapshot();
+    clearTimeout(this.dialogueTimer);
+    document.querySelector("#dialogue").classList.add("hidden");
+    this.dialogueLines = null; this.dialogueDone = null;
+    return snapshot;
   }
 
   restoreDialogue(snapshot) {
@@ -338,6 +392,7 @@ export class UI {
     const button = document.querySelector("#skipCelebration");
     button.onclick = onSkip;
     document.querySelector("#celebration").classList.remove("hidden");
+    this.syncInert?.();
     button.focus();
   }
 
@@ -346,9 +401,10 @@ export class UI {
     document.querySelector("#skipCelebration").onclick = null;
   }
 
-  modal({ icon, eyebrow, title, text, stats = [], actions = [] }) {
+  modal({ icon, eyebrow, title, text, stats = [], actions = [], dismiss = -1 }) {
     this.hideCelebration();
     this.hideDialogue();
+    this.dismiss = actions[dismiss]?.run || null;
     const modal = document.querySelector("#modal");
     document.querySelector("#modalIcon").textContent = icon;
     document.querySelector("#modalEyebrow").textContent = eyebrow;
@@ -360,10 +416,11 @@ export class UI {
       const button = document.createElement("button");
       button.textContent = action.label;
       if (index === 0) button.className = "primary";
-      button.addEventListener("click", () => { modal.classList.add("hidden"); action.run(); });
+      button.addEventListener("click", () => { modal.classList.add("hidden"); this.dismiss = null; action.run(); });
       return button;
     }));
     modal.classList.remove("hidden");
+    this.syncInert?.();
     container.querySelector("button")?.focus();
   }
 }

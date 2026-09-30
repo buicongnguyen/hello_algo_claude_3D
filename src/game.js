@@ -82,7 +82,10 @@ export class Game {
     this.spawnTimer = 1;
     this.hudElapsed = 0.1;
     this.world.setCampaign?.(this.progress);
-    this.player = { x: 0, z: 13, speed: 6.3, radius: 0.9, object: this.world.createActor("kai", { x: 0, z: 13 }, 0.94) };
+    // Defense stages spawn scouts on the southern lane starts, so KAI begins inside the line instead.
+    const start = this.stage.type === "defense" ? { x: 0, z: 5 } : { x: 0, z: 13 };
+    this.silhouette = false;
+    this.player = { ...start, speed: 6.3, radius: 0.9, object: this.world.createActor("kai", start, 0.94) };
     this.player.object.rotation.order = "YXZ";
     this.player.object.rotation.y = this.player.facing = Math.PI;
     this.world.particles?.clear();
@@ -94,6 +97,7 @@ export class Game {
     // Equipped Twin Thrusters already are a flight rig; never stack a second pair on KAI.
     fitTravelRig(this.world, this.player.object, travel === "fly" && this.progress.equipment.equipped.back === "thrusters" ? null : travel);
     this.travel = travel || "walk";
+    this.silhouette = true;
     this.world.addSilhouette?.(this.player.object);
     this.ui.callbacks?.ambience?.(this.stage);
     if (["scan","escort","homecoming"].includes(this.stage.type)) this.discovery = new DiscoveryActivity(this);
@@ -114,6 +118,8 @@ export class Game {
     this.shields = preserveHealth ? Math.min(this.upgrades.maxShields, this.shields + Math.max(0, this.upgrades.maxShields - previousMax)) : this.upgrades.maxShields;
     this.player.speed = this.upgrades.moveSpeed;
     dressRobot(this.world, this.player.object, this.progress.equipment);
+    // New or swapped attachments need their own x-ray ghosts (a no-op before the first mission setup).
+    if (this.silhouette) this.world.addSilhouette?.(this.player.object);
   }
 
   setupMission() {
@@ -307,7 +313,8 @@ export class Game {
     if (["brawl", "expedition"].includes(this.stage.type) && distance(position, this.player) < 8) position = { x: -position.x, z: -position.z };
     const variant = boss ? "captain" : ["bot", "dog", "drone"][index % 3];
     const model = variant === "dog" ? "zombie_dog" : variant === "drone" ? "rust_drone" : "rust_scout";
-    const enemy = this.makeEntity(boss ? "boss" : "enemy", model, position, boss ? 1.24 : variant === "bot" ? 0.56 : 0.78, { health, maxHealth: health, speed: boss ? 3.7 : variant === "dog" ? 3.4 : 2.4, boss, variant, attackState: "approach", attackTime: 0, frozen: 0 });
+    // `grace`: a freshly spawned robot cannot deal contact damage before the player can see it.
+    const enemy = this.makeEntity(boss ? "boss" : "enemy", model, position, boss ? 1.24 : variant === "bot" ? 0.56 : 0.78, { health, maxHealth: health, speed: boss ? 3.7 : variant === "dog" ? 3.4 : 2.4, boss, variant, attackState: "approach", attackTime: 0, frozen: 0, grace: .8 });
     if (this.stage.type === "defense" && this.stage.id === "approaches") { enemy.health = 3; enemy.maxHealth = 3; enemy.speed = 2.8; }
     if (this.stage.type === "defense" && this.stage.prebuilt && !boss) { enemy.health = 3; enemy.maxHealth = 3; }
     this.cloneMaterials(enemy.object);
@@ -430,10 +437,14 @@ export class Game {
       const speed = this.player.speed * (this.dashTime > 0 ? 2.4 : 1);
       this.player.x += heading.x * speed * dt;
       this.player.z += heading.z * speed * dt;
-      this.world.constrainPlayer?.(this.player);
       // One circular edge everywhere; the boundary fence in the world marks exactly this radius.
-      const radius = Math.hypot(this.player.x, this.player.z);
-      if (radius > PLAY_RADIUS) { this.player.x *= PLAY_RADIUS / radius; this.player.z *= PLAY_RADIUS / radius; }
+      // Props win the last pass: KAI may rest a few centimetres past the fence beside a rim rock, but is
+      // never left inside a prop's footprint (which would also make KAI unreachable for attackers).
+      for (let pass = 0; pass < 3; pass++) {
+        const radius = Math.hypot(this.player.x, this.player.z);
+        if (radius > PLAY_RADIUS) { this.player.x *= PLAY_RADIUS / radius; this.player.z *= PLAY_RADIUS / radius; }
+        this.world.constrainPlayer?.(this.player);
+      }
       this.player.facing = Math.atan2(heading.x, heading.z);
       this.player.object.position.set(this.player.x, 0.55 + Math.sin(this.elapsed * 10) * 0.035, this.player.z);
       this.stepTimer -= dt;
@@ -505,7 +516,8 @@ export class Game {
       const target = this.stage.type === "defense" ? this.relay : this.stage.type === "finale" ? this.core : this.player;
       if (!target) continue;
       const attacking = this.combat.moveEnemy(enemy, target, dt);
-      if (attacking && distance(enemy, this.player) < 1.35) {
+      enemy.grace = Math.max(0, (enemy.grace || 0) - dt);
+      if (attacking && !enemy.grace && distance(enemy, this.player) < 1.35) {
         this.damagePlayer();
       }
       if (this.stage.type === "defense" && distance(enemy, this.relay) < 1.4) {
@@ -676,7 +688,7 @@ export class Game {
     this.pulseCooldown = 1.1;
     this.world.pulse(this.player, radius, 0x65e5ff);
     this.sfx("pulse");
-    let hits = 0;
+    let hits = 0, shielded = false;
     for (const entity of this.entities.filter(entity => entity.active && distance(entity, this.player) <= radius)) {
       if (!this.running) break;
       if (entity.kind === "cell") {
@@ -688,13 +700,14 @@ export class Game {
       } else if (["enemy", "boss"].includes(entity.kind)) {
         if (entity.boss && entity.state !== "exposed") {
           this.ui.message("The shield is solid—bait a charge first", true);
+          shielded = true;
           continue;
         }
         hits += 1;
         this.combat.hit(entity, damage);
       }
     }
-    if (!hits) this.ui.message("No pulse target in range", true);
+    if (!hits && !shielded) this.ui.message("No pulse target in range", true);
   }
 
   collect(entity) {
@@ -748,6 +761,7 @@ export class Game {
       this.ui.dialogue([{ speaker: "WARDEN", text: "Shared-signal patch accepted. Keep the routes open. Ask before closing a door." }, { speaker: "BOLT", text: "Welcome back. You are just in time to help with the festival." }]);
       return this.ui.message("Warden repaired · send the festival signal from the rocket");
     }
+    if (this.expedition && !this.expedition.urgent() && this.combat.repairTarget() && this.combat.repair()) return;
     if (this.expedition?.interact()) return;
     if (this.finalBeacon && !this.carry && distance(this.player, this.finalBeacon) < 2.2) {
       if (this.progressCount < this.stage.count) return this.ui.message("Bring every beach friend to safety first", true);
@@ -855,7 +869,8 @@ export class Game {
   updatePrompt() {
     if (this.discovery) return this.ui.prompt(this.discovery.prompt());
     if (this.expedition) {
-      this.ui.prompt(this.expedition.prompt() || (this.combat.repairTarget() ? "E · REPAIR TEAMMATE · 2 SCRAP" : ""));
+      const repair = this.combat.repairTarget() && !this.expedition.urgent() ? "E · REPAIR TEAMMATE · 2 SCRAP" : "";
+      this.ui.prompt(repair || this.expedition.prompt());
       return;
     }
     let text = "";
@@ -941,6 +956,7 @@ export class Game {
     }
     if (this.stage.type === "defense" && this.phase === "prepare") return nearest(this.pads.filter(p => !p.placed).map(p => p.position), "Gold pad · Use to build");
     if (this.stage.type === "defense" && this.phase === "ready") return { ...this.relay, label: "Defense ready · press Use / E" };
+    if (this.stage.type === "defense" && this.stage.prebuilt && this.phase === "battle" && !this.entities.some(e => e.kind === "enemy" && e.active)) return { x: 0, z: 3, label: "Centre lane · the turrets hold the flanks" };
     if (this.stage.type === "finale" && this.phase === "launch") return { ...this.rocketGoal, label: "Festival rocket · Use to launch" };
     if (this.stage.type === "finale" && this.phase === "repair") return { ...this.wardenRepair, label: "Warden · Use to install free repair" };
     if (this.boss?.active) return { ...this.boss, label: this.boss.state === "exposed" ? "Core exposed · Pulse now" : "Boss shielded · dodge its charge" };
@@ -954,8 +970,8 @@ export class Game {
     this.input.clear();
     this.input.enabled = false;
     // The pause menu covers the radio; resuming must bring back any unread lines.
-    const radio = this.ui.dialogueSnapshot?.();
-    this.ui.modal({ icon: "Ⅱ", eyebrow: "Mission paused", title: this.stage.name, text: `${this.stage.objective}${challengeStatus(this) ? ` Optional: ${challengeStatus(this).text}.` : ""}`, actions: [
+    const radio = this.ui.suspendDialogue ? this.ui.suspendDialogue() : this.ui.dialogueSnapshot?.();
+    this.ui.modal({ icon: "Ⅱ", eyebrow: "Mission paused", dismiss: 0, title: this.stage.name, text: `${this.stage.objective}${challengeStatus(this) ? ` Optional: ${challengeStatus(this).text}.` : ""}`, actions: [
       { label: "Resume", run: () => { this.input.clear(); this.input.enabled = true; this.paused = false; if (radio) this.ui.restoreDialogue?.(radio); } },
       { label: "Restart", run: () => this.begin(this.item) },
       this.returnAction(),

@@ -7,6 +7,20 @@ export function stageKey(chapterId, stageId) {
   return `${chapterId}:${stageId}`;
 }
 
+const QUALITIES = ["auto", "low", "medium", "high"];
+const prefersReducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+export function normalizeSettings(raw) {
+  const settings = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  return {
+    ...settings,
+    quality: QUALITIES.includes(settings.quality) ? settings.quality : "auto",
+    reducedMotion: typeof settings.reducedMotion === "boolean" ? settings.reducedMotion : prefersReducedMotion(),
+    sound: settings.sound !== false,
+    campaignMode: settings.campaignMode === "challenge" ? "challenge" : "story",
+  };
+}
+
 export function createProgress(raw = {}) {
   if (!raw || typeof raw !== "object") raw = {};
   const migrate = raw.version === SAVE_VERSION && raw.campaignRevision !== 2;
@@ -20,7 +34,7 @@ export function createProgress(raw = {}) {
     expeditionResults: Object.fromEntries(["coral", "scrapyard", "moonpool"].filter(id => Number.isFinite(raw.expeditionResults?.[id]) && raw.expeditionResults[id] >= 0).map(id => [id, raw.expeditionResults[id]])),
     completed: !migrate && Array.isArray(raw.completed) ? [...new Set(raw.completed.filter(value => typeof value === "string"))] : [],
     results: !migrate && raw.results && typeof raw.results === "object" ? { ...raw.results } : {},
-    settings: { quality: "auto", reducedMotion: false, ...(raw.settings || {}), campaignMode: raw.settings?.campaignMode === "challenge" ? "challenge" : "story" },
+    settings: normalizeSettings(raw.settings),
     checkpoint: migrate ? null : normalizeCheckpoint(raw.checkpoint, raw.completed),
   };
 }

@@ -50,16 +50,42 @@ test("Blender environments are real, compressed, content-versioned assets within
   assert.ok(total<6000000);
 });
 
-test("environment collision never covers a spawn point, objective or exhibit",()=>{
+// The runtime reads collision from the GLB it loaded (glTF extras on the scene root), not the manifest.
+function glbColliders(file) {
+  const bytes=readFileSync(new URL("../public/models/"+file,import.meta.url));
+  const json=JSON.parse(bytes.toString("utf8",20,20+bytes.readUInt32LE(12)));
+  const root=json.nodes.find(node=>typeof node.extras?.colliders==="string");
+  return root?JSON.parse(root.extras.colliders):null;
+}
+const segmentDistance=(p,a,b)=>{
+  const dx=b.x-a.x,dz=b.z-a.z,t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.z-a.z)*dz)/(dx*dx+dz*dz||1)));
+  return Math.hypot(p.x-a.x-t*dx,p.z-a.z-t*dz);
+};
+
+test("environment collision never covers a spawn point, objective, exhibit, pickup or route",()=>{
   const manifest=JSON.parse(readFileSync(new URL("../public/models/journey-manifest.json",import.meta.url)));
-  const colliders=Object.fromEntries(manifest.assets.map(asset=>[asset.name,asset.colliders]));
+  const colliders=Object.fromEntries(manifest.assets.map(asset=>[asset.name,glbColliders(asset.file)]));
+  for(const asset of manifest.assets) if(asset.colliders) assert.deepEqual(colliders[asset.name],asset.colliders,`${asset.name}: manifest matches the GLB`);
   const playerRadius=.9;
   for(const {stage} of ALL_STAGES) {
     const solid=colliders["journey_"+stage.scene];
     assert.ok(Array.isArray(solid),`${stage.scene} exports collision footprints`);
-    const points=[{x:0,z:13},...(stage.positions||[]),...(stage.shelters||[]),...(stage.gatePositions||[]),...(stage.route||[]),...(stage.exhibits||[]),stage.goal,stage.source,stage.receiver].filter(Boolean);
+    // Spawn, BOLT, the escort buoy and the fixed combat pickups exist on every destination.
+    const points=[{x:0,z:13},{x:-3,z:7},{x:-2,z:10},{x:3,z:8},{x:-5,z:6},{x:6,z:5},...(stage.positions||[]),...(stage.shelters||[]),...(stage.gatePositions||[]),...(stage.route||[]),...(stage.exhibits||[]),stage.goal,stage.source,stage.receiver].filter(Boolean);
+    const chains=[];
+    if(stage.type==="race") chains.push([{x:0,z:13},...stage.gatePositions]);
+    if(stage.type==="escort") { points.push({x:-2,z:12}); chains.push([{x:-2,z:12},...stage.route]); }
+    if(stage.type==="relay") chains.push([stage.source,...stage.positions,stage.receiver]);
+    if(stage.type==="homecoming") chains.push([{x:0,z:13},stage.goal]);
+    if(stage.type==="defense") {
+      points.push({x:0,z:-11},...(stage.pads===2?[{x:-6,z:-3},{x:6,z:-3}]:[{x:-7,z:-3},{x:0,z:-3},{x:7,z:-3}]));
+      for(const x of [-7,-6,0,6,7]) chains.push([{x,z:14},{x:0,z:-11}]);
+    }
     for(const point of points) for(const [x,z,radius] of solid) {
       assert.ok(Math.hypot(point.x-x,point.z-z)>=radius+playerRadius,`${stage.id}: (${point.x}, ${point.z}) is blocked by a collider at (${x}, ${z})`);
+    }
+    for(const chain of chains) for(let i=1;i<chain.length;i++) for(const [x,z,radius] of solid) {
+      assert.ok(segmentDistance({x,z},chain[i-1],chain[i])>=radius+playerRadius,`${stage.id}: the path ${JSON.stringify(chain[i-1])} to ${JSON.stringify(chain[i])} is blocked by a collider at (${x}, ${z})`);
     }
     for(const [x,z,radius] of solid) assert.ok(Number.isFinite(x)&&Number.isFinite(z)&&radius>0&&radius<12);
   }

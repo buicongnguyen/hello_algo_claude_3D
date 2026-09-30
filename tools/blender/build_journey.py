@@ -14,7 +14,9 @@ import inspect
 import json
 import math
 import re
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import bpy
@@ -98,6 +100,8 @@ def keep_clear(scene_key):
     points = many("positions") + many("shelters") + many("gatePositions") + many("route")
     points += [p for p in (one("goal"), one("source"), one("receiver")) if p]
     clear += [("point", (p, 3.2)) for p in points]
+    # Exhibit markers sit beside their festival stalls: keep the player's radius (plus slack) free.
+    clear += [("point", (p, 1.0)) for p in many("exhibits")]
     chains = []
     if kind == "race":
         chains.append([(0, 13)] + many("gatePositions"))
@@ -162,7 +166,7 @@ def scatter(s, radius_range, count, fn, arc=(0, math.tau), low_ok=True):
         x, z = math.cos(a) * r, math.sin(a) * r
         if not low_ok and s.low_only(x, z, 40):
             continue
-        if r < 19.5 and not s.clear_of_routes(x, z, .6):
+        if r < 19.5 and not s.clear_of_routes(*s.place(x, z), .6):
             continue
         fn(x, z)
 
@@ -177,12 +181,13 @@ def city(s, M, home=False):
     paving = ground_colors(0x9d9b96, 0xb4b0a8, 0x86847f, .09, 3) if not home else ground_colors(0x6f6a78, 0x847d8c, 0x5c5866, .09, 5)
     terrain(s, M["ground"], lambda x, z, r: 0.0, paving)
     # Plaza tiling rings and a compass inlay keep the open centre readable.
-    for radius, tone in ((7.2, 0xc9c2b5), (6.9, 0x9b958c), (4.2, 0xc9c2b5), (3.9, 0x8d877f)):
-        s.emit(bm_cylinder(radius, .02, 40), M["stone"], at(-11 if not home else 0, G + .015 + radius * .0005, -8 if not home else 5), color=c(tone), ao=1, jitter=.02)
+    for layer, (radius, tone) in enumerate(((7.2, 0xc9c2b5), (6.9, 0x9b958c), (4.2, 0xc9c2b5), (3.9, 0x8d877f))):
+        s.emit(bm_cylinder(radius, .02, 40), M["stone"], at(-11 if not home else 0, G + .015 + layer * .009, -8 if not home else 5), color=c(tone), ao=1, jitter=.02)
     P.road(s, M, (0, -60), (0, 60), 7.0, gaps=((58, 64),))
-    P.road(s, M, (-60, 1), (-3.5, 1), 6.0, dashes=True)
-    P.road(s, M, (3.5, 1), (60, 1), 6.0, dashes=True)
-    s.emit(bm_box(7.0, .03, 6.0), M["ground"], at(0, G + .012, 1), color=c(0x3a3f46), ao=1)
+    P.road(s, M, (-60, 1), (-3.5, 1), 6.0, dashes=True, layer=1)
+    P.road(s, M, (3.5, 1), (60, 1), 6.0, dashes=True, layer=1)
+    # The intersection patch sits 9 mm above the north-south asphalt instead of sharing its plane.
+    s.emit(bm_box(7.0, .03, 6.0), M["ground"], at(0, G + .021, 1), color=c(0x3a3f46), ao=1)
     for x, z, yaw in ((0, 6.2, 0), (0, -4.2, 0), (-5.6, 1, math.pi / 2), (5.6, 1, math.pi / 2)):
         P.crosswalk(s, M, x, z, yaw, 6.4 if yaw == 0 else 5.6, 7)
     # North skyline: layered blocks give depth behind the repair shop.
@@ -267,9 +272,9 @@ def countryside(s, M):
         t = i / 21
         x = -8 + math.sin(t * 3.1) * 3 + t * 6
         z = 20 - t * 46
-        P.ground_patch(s, M, x, z, 1.5 + (i % 3) * .2, 0x8a6b48)
+        P.ground_patch(s, M, x, z, 1.5 + (i % 3) * .2, 0x8a6b48, y=G + .012 + (i % 3) * .008)
     for i in range(12):
-        P.ground_patch(s, M, -12 + i * 2.4, -16 - math.sin(i * .6) * 1.2, 1.3, 0x8a6b48)
+        P.ground_patch(s, M, -12 + i * 2.4, -16 - math.sin(i * .6) * 1.2, 1.3, 0x8a6b48, y=G + .036 + (i % 2) * .008)
     P.barn(s, M, -15, -27, .15)
     P.silo(s, M, -24, -24, 10)
     P.silo(s, M, -26.5, -29, 8)
@@ -391,7 +396,7 @@ def reef(s, M):
         x, z = math.cos(a) * r, math.sin(a) * r
         low = s.low_only(x, z, 40)
         pick = s.random.random()
-        y = G + max(0, (r - 21) * .3)
+        y = s.ground_y(x, z, .8)
         if pick < .3 and not low:
             P.coral_branch(s, M, x, z, s.random.uniform(1.2, 1.9), s.random.choice(palette), y=y)
         elif pick < .5:
@@ -406,7 +411,8 @@ def reef(s, M):
         for k in range(4):
             if s.low_only(x, -10 + k * 3, 40):
                 continue
-            P.kelp(s, M, x + s.random.uniform(-1, 1), -14 + k * 4 + s.random.uniform(-1, 1), s.random.uniform(6, 10), 0x6f9a3a, y=G + 1)
+            kx, kz = x + s.random.uniform(-1, 1), -14 + k * 4 + s.random.uniform(-1, 1)
+            P.kelp(s, M, kx, kz, s.random.uniform(6, 10), 0x6f9a3a, y=s.ground_y(kx, kz, .4))
     # Natural stone arch framing the northern horizon.
     arch = [Vector((-6, G, -27)), Vector((-4, G + 5, -28)), Vector((0, G + 7, -28.5)), Vector((4, G + 5, -28)), Vector((6, G, -27))]
     s.emit(bm_tube(arch, 1.3, 9, [1.8, 1.4, 1.2, 1.4, 1.8]), M["stone"], color=c(0x7f948c), ao=.55, ao_height=5, smooth=True)
@@ -482,11 +488,11 @@ def wreck(s, M):
         r = s.random.uniform(21, 32)
         x, z = math.cos(a) * r, math.sin(a) * r
         if s.low_only(x, z, 40):
-            P.brain_coral(s, M, x, z, s.random.uniform(.6, 1.1), 0xb89a6a, collide=False, y=G + max(0, (r - 21) * .25))
+            P.brain_coral(s, M, x, z, s.random.uniform(.6, 1.1), 0xb89a6a, collide=False, y=s.ground_y(x, z, .6))
         else:
-            P.coral_branch(s, M, x, z, s.random.uniform(.9, 1.4), s.random.choice((0xd8a16a, 0x9fc9a0, 0xc98ad8)), y=G + max(0, (r - 21) * .25))
+            P.coral_branch(s, M, x, z, s.random.uniform(.9, 1.4), s.random.choice((0xd8a16a, 0x9fc9a0, 0xc98ad8)), y=s.ground_y(x, z, .6))
     for x, z in ((-28, 2), (-30, 8), (28, -6), (30, 2), (26, 18), (-26, 18)):
-        P.kelp(s, M, x, z, s.random.uniform(5, 8), 0x5a7a2e, y=G + 1)
+        P.kelp(s, M, x, z, s.random.uniform(5, 8), 0x5a7a2e, y=s.ground_y(x, z, .4))
     scatter(s, (5, 19), 40, lambda x, z: P.seagrass(s, M, x, z, 6, s.random.uniform(.5, .9), 0x6f8a3a))
     scatter(s, (6, 19), 10, lambda x, z: P.rock(s, M, x, z, s.random.uniform(.3, .6), 0x6f7a6a, collide=False))
     scatter(s, (6, 19), 8, lambda x, z: P.shell_scatter(s, M, x, z, 3, .6))
@@ -518,7 +524,7 @@ def abyss(s, M):
         r = s.random.uniform(20.5, 27)
         x, z = math.cos(a) * r, math.sin(a) * r
         low = s.low_only(x, z, 40)
-        y = G + max(0, (r - 21) * .8)
+        y = s.ground_y(x, z, .9)
         if i % 3 == 0 and not low:
             P.vent(s, M, x, z, s.random.uniform(3, 5.5), 0x2a2630, y=y, glow="warm")
         else:
@@ -709,10 +715,16 @@ def orbit(s, M):
     s.emit(bm_cylinder(edge + 3, .8, 64), M["paint"], at(0, G - .4, 0), color=c(0xaab4bd), ao=1)
     s.emit(bm_cylinder(edge + .9, .03, 64), M["paint"], at(0, G + .01, 0), color=c(0x7d8894), ao=1)
     for ring in range(4):
-        for i in range(12 + ring * 6):
-            a = (i + ring * .5) / (12 + ring * 6) * math.tau
-            r = 3 + ring * 4.2
-            s.emit(bm_box(2.8, .025, 3.2), M["paint"], at(math.cos(a) * r, G + .02, math.sin(a) * r, math.pi / 2 - a), color=scale(c(0x8a95a0), s.random.uniform(.9, 1.08)), ao=1, jitter=.02)
+        count = 12 + ring * 6
+        r = 3 + ring * 4.2
+        inner, outer = r - 1.6, r + 1.6
+        for i in range(count):
+            a = (i + ring * .5) / count * math.tau
+            # 5 cm seams at the inner edge keep neighbours apart; 9 mm above the base disc.
+            half = math.pi / count - .025 / inner
+            arc = [a - half + 2 * half * t / 3 for t in range(4)]
+            outline = [(math.cos(b) * outer, math.sin(b) * outer) for b in arc] + [(math.cos(b) * inner, math.sin(b) * inner) for b in reversed(arc)]
+            s.emit(bm_prism(outline, .025), M["paint"], at(0, G + .0345 - .025, 0), color=scale(c(0x8a95a0), s.random.uniform(.9, 1.08)), ao=1, jitter=.02)
     for i in range(12):
         a = i / 12 * math.tau
         s.emit(bm_box(.08, .04, 19), M["dark"], at(math.cos(a) * 9.6, G + .035, math.sin(a) * 9.6, math.pi / 2 - a), color=c(0x3a4250), ao=1)
@@ -784,13 +796,14 @@ def lunar(s, M, kind):
     terrain(s, M["ground"], height, regolith)
     # Shallow craters inside the play space are colour and low rims only; they never collide.
     for x, z, radius in ((-5, 12, 2.2), (14, 3, 1.6), (-15, -8, 2.6), (6, -14, 1.8), (-14, 14, 1.2)):
-        if s.clear_of_routes(x, z, radius * .5):
-            s.emit(bm_torus(radius, .32, 28, 6), M["stone"], at(x, G - .06, z, 0, 1, .38, 1), color=c(0xb9b7b3), ao=.85, smooth=True)
-            P.ground_patch(s, M, x, z, radius * .8, 0x8a8884)
-            for k in range(4):
-                a = s.random.uniform(0, math.tau)
-                P.rock(s, M, x + math.cos(a) * radius * 1.25, z + math.sin(a) * radius * 1.25, s.random.uniform(.12, .25), 0x9a9894, collide=False)
-    scatter(s, (19.5, 34), 36, lambda x, z: P.rock(s, M, x, z, s.random.uniform(.6, 1.8), 0x8f8c88, y=G + 1.2 * smoothstep(21, 30, math.hypot(x, z))))
+        if s.clear_of_routes(*s.place(x, z), radius * .5):
+            with s.anchor(x, z):
+                s.emit(bm_torus(radius, .32, 28, 6), M["stone"], at(x, G - .06, z, 0, 1, .38, 1), color=c(0xb9b7b3), ao=.85, smooth=True)
+                P.ground_patch(s, M, x, z, radius * .8, 0x8a8884)
+                for k in range(4):
+                    a = s.random.uniform(0, math.tau)
+                    P.rock(s, M, x + math.cos(a) * radius * 1.25, z + math.sin(a) * radius * 1.25, s.random.uniform(.12, .25), 0x9a9894, collide=False)
+    scatter(s, (19.5, 34), 36, lambda x, z: P.rock(s, M, x, z, s.random.uniform(.6, 1.8), 0x8f8c88, y=s.ground_y(x, z, .8)))
     scatter(s, (5, 19), 26, lambda x, z: P.rock(s, M, x, z, s.random.uniform(.15, .35), 0x9a9894, collide=False))
     gold, foil = 0xd9a93a, 0xc9b27a
     if kind == "moonplain":
@@ -921,7 +934,20 @@ BUILDERS = {
 
 def main():
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    unknown = [arg for arg in args if arg not in BUILDERS]
+    if unknown:
+        raise ValueError(f"Unknown scene(s) {', '.join(unknown)}; choose from {', '.join(BUILDERS)}")
     selected = [key for key in BUILDERS if not args or key in args]
+    # GLBs are written to a staging folder and moved into public/models only after every scene built,
+    # so a scene that throws halfway never leaves new models next to an old manifest.
+    staging = Path(tempfile.mkdtemp(prefix="journey-build-"))
+    try:
+        build(selected, staging)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def build(selected, staging):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     M = P.materials()
     M["shallow"] = kit.Material("Water shallow", 0x2aa9c0, metal=.05, rough=.05, uv=1 / 8, alpha=.5)
@@ -950,7 +976,7 @@ def main():
         for obj in objects:
             obj.select_set(True)
         bpy.context.view_layer.objects.active = root
-        path = OUT / (name + ".glb")
+        path = staging / (name + ".glb")
         bpy.ops.export_scene.gltf(
             filepath=str(path), export_format="GLB", use_selection=True, export_apply=True, export_yup=True,
             export_vertex_color="MATERIAL", export_extras=True, export_draco_mesh_compression_enable=True, export_draco_mesh_compression_level=6,
@@ -973,9 +999,14 @@ def main():
                 old.objects.unlink(obj)
             collection.objects.link(obj)
         collection.hide_viewport = True
+    for entry in report:
+        if (staging / entry["file"]).exists():
+            shutil.move(str(staging / entry["file"]), str(OUT / entry["file"]))
     if len(selected) == len(BUILDERS):
         bpy.ops.wm.save_as_mainfile(filepath=str(SOURCE / "discovery_environments.blend"))
-    manifest_path.write_text(json.dumps({"generator": "Blender / build_journey.py", "source": "assets/blender/discovery_environments.blend", "compression": "KHR_draco_mesh_compression", "assets": report}, indent=2), encoding="utf8")
+    else:
+        print("NOTE: partial build; assets/blender/discovery_environments.blend is refreshed only by a full build")
+    manifest_path.write_text(json.dumps({"generator": "Blender / build_journey.py", "source": "assets/blender/discovery_environments.blend", "compression": "KHR_draco_mesh_compression", "assets": report}, indent=2), encoding="utf8", newline="\n")
     print("TOTAL_BYTES", sum(asset["bytes"] for asset in report))
 
 

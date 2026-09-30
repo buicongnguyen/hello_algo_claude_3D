@@ -306,8 +306,13 @@ def car(s, M, x, z, yaw=0.0, body=0xd8574a, y=GROUND_Y):
     return True
 
 
-def road(s, M, a, b, width=6.0, asphalt=0x3a3f46, line=0xf2eee2, curb=0xbdb7ad, sidewalk=0x9d9a94, dashes=True, y=GROUND_Y, gaps=()):
-    """Asphalt with lane dashes; curbs and sidewalks stop at `gaps` (distance ranges from `a`)."""
+def road(s, M, a, b, width=6.0, asphalt=0x3a3f46, line=0xf2eee2, curb=0xbdb7ad, sidewalk=0x9d9a94, dashes=True, y=GROUND_Y, gaps=(), layer=0):
+    """Asphalt with lane dashes; curbs and sidewalks stop at `gaps` (distance ranges from `a`).
+
+    `layer` lifts this road's sidewalks by 9 mm per step, so walks where two roads cross never share a
+    plane (Draco quantizes heights to ~4 mm, so anything closer z-fights).
+    """
+    lift = layer * .009
     a, b = Vector((a[0], 0, a[1])), Vector((b[0], 0, b[1]))
     direction = b - a
     length = direction.length
@@ -337,10 +342,10 @@ def road(s, M, a, b, width=6.0, asphalt=0x3a3f46, line=0xf2eee2, curb=0xbdb7ad, 
             s.emit(bm_box(.3, .16, d1 - d0), M["stone"], at(p.x + offset.x, y + .06, p.z + offset.z, yaw), color=c(curb), ao=.8)
             if sidewalk:
                 walk = across * side * (width / 2 + 1.55)
-                s.emit(bm_box(2.5, .1, d1 - d0), M["stone"], at(p.x + walk.x, y + .03, p.z + walk.z, yaw), color=c(sidewalk), ao=1, jitter=.03)
+                s.emit(bm_box(2.5, .1, d1 - d0), M["stone"], at(p.x + walk.x, y + .03 + lift, p.z + walk.z, yaw), color=c(sidewalk), ao=1, jitter=.03)
                 for k in range(int((d1 - d0) / 1.25)):
                     q = a + unit * (d0 + (k + 1) * 1.25) + walk
-                    s.emit(bm_box(2.5, .1, .04), M["stone"], at(q.x, y + .035, q.z, yaw), color=scale(c(sidewalk), .86), ao=1)
+                    s.emit(bm_box(2.5, .1, .04), M["stone"], at(q.x, y + .035 + lift, q.z, yaw), color=scale(c(sidewalk), .86), ao=1)
 
 
 def crosswalk(s, M, x, z, yaw=0.0, width=6.0, stripes=6, y=GROUND_Y):

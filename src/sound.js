@@ -156,8 +156,9 @@ export class Sound {
     this.bed = null;
     if (!bed || !this.context) return;
     const t = this.context.currentTime;
-    bed.gain.gain.cancelScheduledValues(t);
-    bed.gain.gain.setValueAtTime(Math.max(.0001, bed.gain.gain.value), t);
+    // Hold the fade-in wherever it is now; `.value` does not report automation in every browser.
+    if (bed.gain.gain.cancelAndHoldAtTime) bed.gain.gain.cancelAndHoldAtTime(t);
+    else { bed.gain.gain.cancelScheduledValues(t); bed.gain.gain.setValueAtTime(Math.max(.0001, bed.gain.gain.value), t); }
     bed.gain.gain.exponentialRampToValueAtTime(.0001, t + 1.2);
     setTimeout(() => { for (const node of bed.nodes) { try { node.stop?.(); } catch { /* already stopped */ } node.disconnect(); } }, 1400);
   }

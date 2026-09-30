@@ -817,7 +817,13 @@ for index, (asset_name, builder) in enumerate(builders.items()):
     asset_root.location.y = (index // 5) * spacing
     roots[asset_name] = asset_root
 
-bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
+# The engine only affects how the saved .blend opens; its identifier changed across Blender versions.
+for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"):
+    try:
+        bpy.context.scene.render.engine = engine
+        break
+    except TypeError:
+        continue
 bpy.ops.wm.save_as_mainfile(filepath=str(SOURCE_DIR / "robot_beach_assets.blend"))
 
 

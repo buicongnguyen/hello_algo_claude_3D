@@ -15,6 +15,8 @@ const executablePath = [
 ].find(path => existsSync(path));
 assert.ok(executablePath, "Chrome or Edge is required");
 const server = process.env.GAME_URL ? null : spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(PORT), "--strictPort"], { cwd: ROOT, stdio: ["ignore", "pipe", "inherit"] });
+// Also covers a Vite start-up failure or timeout, which throws before the try/finally below.
+process.once("exit", () => server?.kill("SIGTERM"));
 if (server) await new Promise((resolve, reject) => {
   const timeout = setTimeout(() => reject(new Error("Vite did not start")), 12000);
   server.stdout.on("data", chunk => { if (String(chunk).replace(/\x1b\[[0-9;]*m/g, "").includes(`http://127.0.0.1:${PORT}`)) { clearTimeout(timeout); resolve(); } });
@@ -28,7 +30,7 @@ try {
   page.on("pageerror", error => errors.push(error.message));
   page.on("console", message => { if (message.type() === "error" && /THREE|WebGL|shader/i.test(message.text())) errors.push(message.text()); });
   await page.goto(URL, { waitUntil: "networkidle" });
-  await page.locator("#gameTitle").waitFor({ state: "visible" });
+  await page.locator("#gameTitle").waitFor({ state: "visible", timeout: 60_000 });
   assert.equal(await page.evaluate(()=>window.__ROBOT_BEACH__.world.models.size),42);
   await page.locator("#continueButton").click();
   assert.equal(await page.locator("#campaignModeSelect").inputValue(),"story");
@@ -104,6 +106,8 @@ try {
   assert.ok(await page.evaluate(()=>window.__ROBOT_BEACH__.game.progress.completed.includes("siege:signalbreak")));
   // A second context exercises actual localStorage migration, not just the pure normalizer.
   const legacy=await browser.newPage({viewport:{width:390,height:844}});
+  legacy.on("pageerror",error=>errors.push(error.message));
+  legacy.on("console",message=>{ if(message.type()==="error" && /THREE|WebGL|shader/i.test(message.text())) errors.push(message.text()); });
   await legacy.addInitScript(()=>{
     if(!localStorage.getItem("migration-seeded")) {
       localStorage.setItem("migration-seeded","yes");

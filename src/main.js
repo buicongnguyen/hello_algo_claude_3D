@@ -29,6 +29,8 @@ const input = new InputController();
 const world = new World(canvas, progress.settings);
 const sound = new Sound();
 sound.enabled = progress.settings.sound !== false;
+// Browsers allow audio only after a gesture, so the first tap or key anywhere (menus included) unlocks it.
+for (const type of ["pointerdown", "keydown"]) document.addEventListener(type, () => sound.unlock(), true);
 let game;
 let ui;
 

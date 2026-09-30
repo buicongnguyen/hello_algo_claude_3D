@@ -22,7 +22,7 @@ Extras: storm lightning flashes, underwater light shafts, and a procedural Earth
 - Terrain is flat and walkable inside the 18.5 m play space and rises into hills, dunes, reef walls, trench cliffs, craters or terraces beyond it. There are no more floating slabs.
 - Every corner carries a baked colour: tint × ambient occlusion × per-prop variation. Geometry is batched into one mesh per material, so a destination costs at most **16 draw calls**.
 - The prop library includes buildings with framed and lit windows, awnings, signs and rooftop kit; streets with curbs and crosswalks; lamps, benches and cars; barns, silos, windmills and crops; palms, umbrellas, sandcastles and footprints; branching, brain and fan coral, kelp and anemones; a ribbed shipwreck; basalt columns, vents and bioluminescence; a research platform; atolls with shallow water; cloud decks; an orbital station; a lunar lander, rover and observatory; and the museum festival.
-- Scenes are Draco-compressed: **17.6k–72.3k triangles per destination, 4.38 MB for all 17 journey GLBs** (previously 5.50 MB for primitive scenes of at most 16k triangles).
+- Scenes are Draco-compressed: **18.8k–71.6k triangles per destination, 4.35 MB for all 17 journey GLBs** (previously 5.50 MB for primitive scenes of at most 16k triangles).
 - Placement reads objective points, routes and spawns from `src/journey-data.js`. A solid prop that would block gameplay is skipped automatically.
 - **127 collision footprints** are exported as glTF extras inside each GLB and loaded with the model. KAI, enemies, allies and BOLT no longer walk through scenery.
 - `blender --background --python tools/blender/build_journey.py -- city reef` rebuilds only the named scenes.
@@ -88,6 +88,87 @@ The review also noted by-design behaviours, left unchanged: Story mode keeps shi
   - A 24-wave combat stress plateaus at the existing pool caps.
   - Phone portrait on the medium profile also holds 60 fps.
 - These are rendering-cost checks on one machine, not a hardware FPS guarantee.
+
+## 5b. Second review pass — logic, rendering, UI, pipeline and tests
+
+A second review covered gameplay logic, rendering, UI and accessibility, and the Blender pipeline and tests. Every confirmed finding is fixed below.
+
+**Gameplay**
+
+| Defect | Fix |
+|---|---|
+| A player in the pocket between a rim prop and the edge froze every enemy (no route to a target inside an inflated footprint) | `reachablePoint` moves the destination to the nearest standable spot; A* falls back to the closest valid node (`src/navigation.js`) |
+| KAI could be pushed into a prop by the edge clamp | Clamp, resolve props, clamp again |
+| Summoned crabs could spawn or idle outside the boundary | Crabs and allies are clamped to the play space |
+| Pulsing a shielded boss replaced the shield hint with "No pulse target" | The shield explanation stays |
+| Defense scouts spawned onto KAI and hit before they were visible | KAI starts inside the line; new robots have a 0.8 s contact grace |
+| A downed robot beside the clam or exit could not be repaired | Repair wins unless carrying, lifting a friend or finishing |
+
+**Rendering**
+
+- The x-ray silhouette is idempotent: weapon and equipment pickups re-dress KAI fully ghosted.
+- Stencil state no longer leaks into cached model materials shared with BOLT and menus.
+- Each ghost owns its material.
+- Custom shaders (particles, fence, planet) are tone-mapped and colour-managed like the rest of the frame.
+- Shadow maps update once per frame, not once per render pass.
+- A lost and restored WebGL context rebuilds the environment.
+- Quality changes free the shadow map and composer targets, and `auto` re-resolves on resize.
+- The particle pool allocates nothing per frame.
+
+**UI and accessibility**
+
+- Messages are a top-level toast, so menu-time warnings (for example, failed model loads) are visible.
+- The field manual takes focus. Escape closes it and returns focus.
+- Escape resumes from the pause menu without re-pausing.
+- Everything behind an open dialog is inert.
+- Reduced motion defaults to the OS preference until the player chooses. The in-game setting also drives CSS, and the damage flash becomes a short, soft fade.
+- Mouse clicks on Next/Skip don't keep focus.
+- Taps within 300 ms of play starting are ignored, so they are not read as shots.
+- Quality offers Medium, and saved settings are validated.
+- Pausing suspends the radio instead of finishing it.
+- Audio unlocks on the first gesture anywhere.
+
+**Blender pipeline** (all 17 scenes rebuilt; collision footprints are unchanged)
+
+- Rebuilds are byte-identical across Blender processes and between full and partial builds:
+  - UV spheres are rebuilt in a canonical order.
+  - Node names carry the scene key.
+- Decals no longer z-fight after Draco quantization:
+  - Plaza rings stack at 9 mm steps.
+  - Crossing roads' sidewalks and the intersection patch are layered.
+  - Orbit apron tiles are seamed annular sectors instead of overlapping boxes.
+  - Countryside lane patches alternate heights.
+- Rim props use `Scene.ground_y`, which is the terrain formula including camera-side clearance. Props floating more than 0.5 m on the camera side: abyss 38 → 0, reef 15 → 0, wreck 4 → 0, moon plain 2 → 0.
+- Homecoming exhibits are kept clear automatically.
+- Crater rims move with their crater.
+- Scatter tests keep-clear at the pushed position.
+- `npm run assets:journey -- city reef` forwards scene names. Builds use `--factory-startup` and have a timeout. A mistyped scene name fails. Models are staged and only replace `public/models` after every scene succeeds.
+
+**Tests and CI**
+
+- New regression tests:
+  - Relay optimum checked against an independent breadth-first search (the old check compared the solver with itself).
+  - Detour tests prove the prop really blocks the straight line.
+  - One test for each gameplay fix.
+  - Silhouette ownership.
+  - Settings validation.
+  - Input grace.
+- The collision test reads the footprints from the GLB extras the runtime loads. It now also covers BOLT, pickups, the buoy, the defense relay and pads, and every race, escort, relay, homecoming and defense path segment.
+- Browser suites:
+  - They never leak a Vite server.
+  - `capture.mjs` pins its port.
+  - The touch-fire check waits for a real shot.
+  - The phone and legacy-save pages report errors.
+  - The fallback check fails both manifests.
+- CI also runs on pull requests (without deploying), and a deploy in progress is never cancelled.
+
+**Verification:**
+
+- `npm test`: 107 passing.
+- The production build is clean.
+- Smoke and story browser suites pass against `vite preview` on an RTX 4080 SUPER (D3D11).
+- A 16-check UI script passes: focus, inert state, Escape, reduced motion and Medium quality.
+- In-game captures of the rebuilt city, orbit, abyss, reef, home, countryside and moon show no console errors and hold 60 fps.
 
 ## 6. Remaining gates to AAA
 

@@ -16,6 +16,8 @@ const executablePath = paths.find(path => path && existsSync(path));
 if (!executablePath) throw new Error("Edge or Chrome is required for the smoke test");
 
 const server = process.env.GAME_URL ? null : spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(PORT), "--strictPort"], { cwd: ROOT, stdio: ["ignore", "pipe", "inherit"] });
+// Also covers a Vite start-up failure or timeout, which throws before the try/finally below.
+process.once("exit", () => server?.kill("SIGTERM"));
 if (server) await new Promise((resolve, reject) => {
   const timeout = setTimeout(() => reject(new Error("Vite did not start")), 12_000);
   server.stdout.on("data", chunk => {
@@ -174,6 +176,7 @@ try {
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   mobile.on("pageerror", error => errors.push(error.message));
+  mobile.on("console", message => { if (message.type() === "error" && /THREE|WebGL|shader/i.test(message.text())) errors.push(message.text()); });
   await mobile.goto(URL, { waitUntil: "networkidle" });
   await mobile.getByRole("heading", { name: /Signalbreak/i }).waitFor({ state: "visible", timeout: 20_000 });
   const overflow = await mobile.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
@@ -197,9 +200,10 @@ try {
   });
   const fire = mobile.locator("[data-touch='shoot']");
   const fireBounds = await fire.boundingBox();
+  await mobile.waitForFunction(() => !window.__ROBOT_BEACH__.input.settling());
   const touchSession = await mobile.context().newCDPSession(mobile);
   await touchSession.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: fireBounds.x + fireBounds.width / 2, y: fireBounds.y + fireBounds.height / 2 }] });
-  await mobile.waitForTimeout(400);
+  await mobile.waitForFunction(() => window.__ROBOT_BEACH__.game.combat.ammo < 36, null, { timeout: 10_000 }).catch(() => {});
   await touchSession.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
   await touchSession.detach();
   if (await mobile.evaluate(() => window.__ROBOT_BEACH__.game.combat.ammo) >= 36) throw new Error("Touch Fire did not shoot");
@@ -329,6 +333,7 @@ try {
   fallbackPage.on("pageerror", error => errors.push(error.message));
   fallbackPage.on("console", message => { if (message.type() === "error" && /THREE|WebGL|shader/i.test(message.text())) errors.push(message.text()); });
   await fallbackPage.route("**/models/manifest.json", route => route.abort());
+  await fallbackPage.route("**/models/journey-manifest.json", route => route.abort());
   await fallbackPage.goto(URL, { waitUntil: "networkidle" });
   // The loading screen also says Signalbreak; wait for initialized game state.
   try {

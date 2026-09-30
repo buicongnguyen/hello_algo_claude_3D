@@ -113,6 +113,7 @@ class Scene:
         self.reach = play_radius + 1.7  # Solid props whose footprint reaches inside this radius need a collider.
         self._anchor = None
         self._held = []
+        self.ground = None  # (height_fn, flat_radius, flat_height), set by terrain()
 
     # ---- authored -> real radius ---------------------------------------------------------
     def push(self, x, z):
@@ -156,6 +157,29 @@ class Scene:
             else:
                 hi = mid
         return (lo + hi) / 2
+
+    def ground_y(self, x, z, footprint=0.0):
+        """Terrain height under an authored point, after the outward push and camera clearance.
+
+        Uses the same formula as terrain(); with a footprint it returns the lowest of five samples,
+        so a prop on a slope is buried on the uphill side instead of floating on the downhill side.
+        """
+        if self.ground is None:
+            raise RuntimeError(f"{self.key}: ground_y() needs terrain() to run first")
+        height_fn, flat_radius, flat_height = self.ground
+        px, pz = self.place(x, z)
+        samples = [(px, pz)] + ([(px + footprint, pz), (px - footprint, pz), (px, pz + footprint), (px, pz - footprint)] if footprint else [])
+        heights = []
+        for sx, sz in samples:
+            r = math.hypot(sx, sz)
+            ra = self.authored_radius(r)
+            if ra <= flat_radius:
+                heights.append(flat_height)
+                continue
+            k = ra / r
+            h = height_fn(sx * k, sz * k, ra)
+            heights.append(flat_height + (h * camera_clearance(sx, sz, r) if h > 0 else h))
+        return min(heights)
 
     # ---- placement rules -------------------------------------------------------------
     def clear_of_routes(self, x, z, radius):
@@ -263,7 +287,7 @@ class Scene:
         for name, batch in self.batches.items():
             if not batch.faces:
                 continue
-            mesh = bpy.data.meshes.new("Scenery_" + name)
+            mesh = bpy.data.meshes.new(f"Scenery_{self.key}_{name}")
             verts = [to_blender(v) for v in batch.verts]
             mesh.from_pydata(verts, [], [face for face, _ in batch.faces])
             mesh.polygons.foreach_set("use_smooth", [smooth for _, smooth in batch.faces])
@@ -278,7 +302,7 @@ class Scene:
             uv.data.foreach_set("uv", [value for pair in batch.uvs for value in pair])
             mesh.materials.append(batch.material.material)
             mesh.validate(clean_customdata=False)
-            obj = bpy.data.objects.new("Scenery_" + name, mesh)
+            obj = bpy.data.objects.new(f"Scenery_{self.key}_{name}", mesh)
             bpy.context.collection.objects.link(obj)
             obj.parent = root
             objects.append(obj)
@@ -313,7 +337,23 @@ def bm_sphere(radius=1.0, subdivisions=2):
 def bm_uv_sphere(radius=1.0, segments=16, rings=8):
     bm = bmesh.new()
     bmesh.ops.create_uvsphere(bm, u_segments=segments, v_segments=rings, radius=radius)
-    return bm
+    # create_uvsphere orders faces (and loop starts) differently from one Blender process to the next,
+    # which churns GLB bytes on every rebuild. Rebuild the same surface in a canonical order.
+    key = lambda co: (round(co.x, 5), round(co.y, 5), round(co.z, 5))
+    verts = sorted(bm.verts, key=lambda v: key(v.co))
+    index = {v: i for i, v in enumerate(verts)}
+    faces = []
+    for face in bm.faces:
+        ids = [index[v] for v in face.verts]
+        k = ids.index(min(ids))
+        faces.append(tuple(ids[k:] + ids[:k]))
+    coords = [v.co.copy() for v in verts]
+    bm.free()
+    out = bmesh.new()
+    new = [out.verts.new(co) for co in coords]
+    for ids in sorted(faces):
+        out.faces.new([new[i] for i in ids])
+    return out
 
 
 def bm_torus(major, minor, major_segments=24, minor_segments=8):
@@ -446,6 +486,7 @@ def terrain(scene, material, height_fn, color_fn, half=60.0, step=1.5, flat_radi
     height_fn and color_fn are authored around the old edge; each vertex samples them at its
     authored radius, so hills, shores and craters move out together with the rim dressing.
     """
+    scene.ground = (height_fn, flat_radius, flat_height)
     count = int(half * 2 / step) + 1
     verts, colors, faces = [], [], []
     for iz in range(count):

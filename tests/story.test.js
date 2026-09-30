@@ -38,12 +38,31 @@ test("relay rays obey the nearest device and cannot power through it or through 
   assert.equal(shortcut.complete, false, "every relay must be on the powered path");
 });
 
+// Reference optimum, independent of solveRelays: breadth-first search over single clockwise quarter-turns.
+function fewestTurns(positions, turns, receiver) {
+  const start = turns.map(t => t % 4), seen = new Set([start.join()]);
+  let frontier = [start];
+  for (let depth = 0; frontier.length; depth++) {
+    const next = [];
+    for (const state of frontier) {
+      if (traceRelays(positions, state, receiver).complete) return depth;
+      for (let i = 0; i < state.length; i++) {
+        const turned = state.slice(); turned[i] = (turned[i] + 1) % 4;
+        if (!seen.has(turned.join())) { seen.add(turned.join()); next.push(turned); }
+      }
+    }
+    frontier = next;
+  }
+  return Infinity;
+}
+
 test("authored relay puzzles start unsolved, are solvable, and publish an achievable optimum", () => {
   for (const id of ["trail", "core"]) {
     const stage = findStage(id).stage;
     assert.equal(traceRelays(stage.positions, stage.turns, stage.receiver).complete, false);
     assert.ok(minimumRelayTurns(stage) > 0 && minimumRelayTurns(stage) <= stage.count * 3);
-    assert.equal(minimumRelayTurns(stage), minimumRelayTurns(stage), "cached result is stable");
+    assert.equal(minimumRelayTurns(stage), fewestTurns(stage.positions, stage.turns, stage.receiver), "the published optimum is the true minimum");
+    assert.equal(minimumRelayTurns({ ...stage }), minimumRelayTurns(stage), "a copy of the stage publishes the same optimum");
   }
 });
 

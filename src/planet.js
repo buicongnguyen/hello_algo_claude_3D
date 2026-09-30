@@ -85,6 +85,8 @@ const atmosphereFragment = /* glsl */`
   void main() {
     float rim = pow(1.0 - max(dot(vNormal, vView), 0.0), 3.0);
     gl_FragColor = vec4(glow * rim * 1.6, rim);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }`;
 
 export function createEarth(world, radius) {

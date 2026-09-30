@@ -15,10 +15,13 @@ const paths = [
 const executablePath = paths.find(path => path && existsSync(path));
 if (!executablePath) throw new Error("Edge or Chrome is required");
 
-const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(PORT)], { cwd: ROOT, stdio: ["ignore", "pipe", "inherit"] });
+const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(PORT), "--strictPort"], { cwd: ROOT, stdio: ["ignore", "pipe", "inherit"] });
+// Also covers a Vite start-up failure or timeout, which throws before the try/finally below.
+process.once("exit", () => server.kill("SIGTERM"));
 await new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error("Vite did not start")), 12_000);
   server.stdout.on("data", chunk => { if (String(chunk).replace(/\x1b\[[0-9;]*m/g, "").includes(`http://127.0.0.1:${PORT}`)) { clearTimeout(timer); resolve(); } });
+  server.once("exit", code => reject(new Error(`Vite exited early (${code})`)));
 });
 
 let browser;

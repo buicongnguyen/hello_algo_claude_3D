@@ -26,7 +26,8 @@ button:disabled { cursor: not-allowed; opacity: 0.44; filter: grayscale(0.75); }
 .damage-flash { position: fixed; inset: 0; z-index: 7; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(255, 70, 50, 0) 52%, rgba(255, 70, 50, .5) 100%); }
 .damage-flash.active { animation: damage-flash .45s ease-out; }
 @keyframes damage-flash { from { opacity: 1; } to { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .damage-flash.active { animation-duration: .2s; } }
+/* Reduced motion keeps the hit cue, as a short, softer fade instead of a strobe. */
+@keyframes damage-flash-soft { from { opacity: .45; } to { opacity: 0; } }
 .hidden { display: none !important; }
 .glass { background: linear-gradient(145deg, rgba(7, 42, 67, 0.91), rgba(2, 23, 39, 0.78)); border: 1px solid var(--line); box-shadow: 0 20px 70px rgba(1, 18, 31, 0.28), inset 0 1px rgba(255,255,255,0.08); backdrop-filter: blur(14px); }
 .screen { position: fixed; inset: 0; z-index: 10; }
@@ -113,7 +114,7 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
 .abilities i { --ready: 100%; position: absolute; inset: auto 0 0; height: 3px; background: linear-gradient(90deg, var(--cyan) var(--ready), rgba(255,255,255,.12) var(--ready)); }
 .crosshair { position: absolute; left: 50%; top: 53%; width: 9px; height: 9px; transform: translate(-50%,-50%); border: 2px solid rgba(255,255,255,.58); border-radius: 50%; }
 .world-prompt { position: absolute; left: 50%; bottom: 100px; transform: translateX(-50%); padding: 11px 16px; border-radius: 13px; background: var(--cream); color: var(--navy); box-shadow: 0 9px 35px rgba(0,0,0,.25); font-size: 12px; font-weight: 900; letter-spacing: .05em; }
-.message { position: absolute; left: 50%; top: 95px; transform: translateX(-50%); max-width: min(520px, 80vw); padding: 10px 16px; border-radius: 13px; background: rgba(7,42,67,.9); border: 1px solid var(--cyan); text-align: center; font-size: 13px; font-weight: 800; }
+.message { position: fixed; z-index: 25; pointer-events: none; left: 50%; top: 95px; transform: translateX(-50%); max-width: min(520px, 80vw); padding: 10px 16px; border-radius: 13px; background: rgba(7,42,67,.9); border: 1px solid var(--cyan); text-align: center; font-size: 13px; font-weight: 800; }
 .message.bad { border-color: var(--coral); color: #ffc2b8; }
 .combat-panel { position: absolute; top: 121px; left: 18px; display: grid; gap: 6px; padding: 14px 17px; border-radius: 18px; max-width: 310px; }
 .combat-panel strong { color: var(--gold); font-size: 17px; }
@@ -240,7 +241,7 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
   .combat-panel span { font-size: 10px; }
   .combat-panel small { font-size: 10px; }
   .combat-panel small:last-child { grid-column: 1 / -1; }
-  .combat-active .message { top: 208px; left: 9px; transform: none; max-width: calc(100% - 124px); font-size: 11px; padding: 9px; }
+  .message.combat-active { top: 208px; left: 9px; transform: none; max-width: calc(100% - 124px); font-size: 11px; padding: 9px; }
   #app:has(.hud.combat-active:not(.hidden)) .dialogue { top: 335px; }
   .touch-controls.combat-active .touch-actions { right: 10px; grid-template-columns: repeat(3, 54px); }
   .touch-controls.combat-active .joystick { left: 10px; width: 94px; height: 94px; }
@@ -296,8 +297,12 @@ kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; 
   .combat-active .world-prompt { bottom: 72px; }
 }
 
+/* The in-game setting (html.reduced-motion) wins; the OS preference applies until the player chooses. */
+:root.reduced-motion *, :root.reduced-motion *::before, :root.reduced-motion *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+:root.reduced-motion .damage-flash.active { animation: damage-flash-soft .25s ease-out !important; }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+  :root:not(.motion-ok) *, :root:not(.motion-ok) *::before, :root:not(.motion-ok) *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+  :root:not(.motion-ok) .damage-flash.active { animation: damage-flash-soft .25s ease-out !important; }
 }
 
 .brief-challenge { color: var(--gold); font-size: 13px; line-height: 1.5; }
