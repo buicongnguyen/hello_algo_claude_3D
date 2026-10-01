@@ -10,9 +10,12 @@ import { CopyShader } from "three/addons/shaders/CopyShader.js";
 
 // Quality is a rendering budget. It never changes gameplay, collision or timing.
 export const QUALITY_PROFILES = Object.freeze({
-  low: Object.freeze({ post: false, ao: false, shadows: false, softShadows: false, shadowMap: 0, pixelRatio: 1, samples: 0 }),
-  medium: Object.freeze({ post: true, ao: false, shadows: true, softShadows: true, shadowMap: 1024, pixelRatio: 1.25, samples: 4 }),
-  high: Object.freeze({ post: true, ao: true, shadows: true, softShadows: true, shadowMap: 2048, pixelRatio: 1.75, samples: 4 }),
+  // ibl: image-based lighting from the sky. On weak GPUs it is the largest per-pixel cost
+  // (SwiftShader at phone size: 14.5 → 32.5 fps without it), so the low tier lights with the
+  // hemisphere alone, brightened to match: the "toy" look.
+  low: Object.freeze({ post: false, ao: false, shadows: false, softShadows: false, shadowMap: 0, pixelRatio: 1, samples: 0, ibl: false }),
+  medium: Object.freeze({ post: true, ao: false, shadows: true, softShadows: true, shadowMap: 1024, pixelRatio: 1.25, samples: 4, ibl: true }),
+  high: Object.freeze({ post: true, ao: true, shadows: true, softShadows: true, shadowMap: 2048, pixelRatio: 1.75, samples: 4, ibl: true }),
 });
 
 export function resolveQuality(setting, width, software = false) {

@@ -11,6 +11,9 @@ import { buildDistrict } from "./districts.js";
 import { JOURNEY_MODEL_NAMES, ENVIRONMENTS } from "./journey-data.js";
 import { actorScale, cameraZoom, CAMERA_YAW, departureHeight, limbPhase, PLAY_RADIUS, VICTORY_DURATION } from "./presentation.js";
 import { Boundary } from "./boundary.js";
+import { Life } from "./life.js";
+import { LIFE_BUDGET, islandLife } from "./life-data.js";
+import { loadGovernor, saveGovernor } from "./governor.js";
 
 const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm", "octopus", "starfish", "snail", "clam", "coral_cluster", "reef_arch", "salvage_tower", "moon_mushroom", "software_disc", "prism_armor", "twin_thrusters", "halo_antenna", "starship"];
 
@@ -65,6 +68,7 @@ export class World {
     this.clock = 0;
     this.resize = this.resize.bind(this);
     window.addEventListener("resize", this.resize);
+    this.governor = loadGovernor();
     this.setQuality(settings.quality || "auto");
   }
 
@@ -246,17 +250,17 @@ export class World {
     this.shared.add(planks);
     this.planks = planks;
 
+    // 28 puffs share one sphere and one draw call; the whole sky drifts slowly in update().
     const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, depthWrite: false });
-    for (let i = 0; i < 7; i += 1) {
-      const cloud = new THREE.Group();
-      for (let j = 0; j < 4; j += 1) {
-        const puff = new THREE.Mesh(new THREE.SphereGeometry(1.2 + j * 0.16, 10, 8), cloudMat);
-        puff.position.set(j * 1.45, Math.sin(j) * 0.35, 0);
-        cloud.add(puff);
-      }
-      cloud.position.set(-30 + i * 10, 15 + (i % 3) * 2, -25 - (i % 2) * 8);
-      this.shared.add(cloud);
+    const clouds = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), cloudMat, 28);
+    clouds.name = "Island clouds";
+    for (let i = 0; i < 7; i += 1) for (let j = 0; j < 4; j += 1) {
+      rock.position.set(-30 + i * 10 + j * 1.45, 15 + (i % 3) * 2 + Math.sin(j) * 0.35, -25 - (i % 2) * 8);
+      rock.scale.setScalar(1.2 + j * 0.16); rock.updateMatrix(); clouds.setMatrixAt(i * 4 + j, rock.matrix);
     }
+    clouds.computeBoundingSphere();
+    this.shared.add(clouds);
+    this.clouds = clouds;
   }
 
   addLandmarks() {
@@ -314,6 +318,7 @@ export class World {
   refreshEnvironmentMap() {
     if (!this.environmentDirty) return;
     this.environmentDirty = false;
+    if (!QUALITY_PROFILES[this.quality || "low"].ibl) { this.scene.environment = null; return; }
     this.scene.environment = this.sky.apply(this.atmosphere);
     this.scene.environmentIntensity = this.atmosphere.environment;
   }
@@ -328,6 +333,8 @@ export class World {
     this.boardwalk.visible = this.planks.visible = !theme;
     this.obstacles = theme ? [] : [...(this.defaultObstacles || [])];
     this.mapLandmarks = [...this.obstacles];
+    const pools = [[-10, -1, 2.5], [7, -10, 2.5], [9, 9, 1.7]];
+    this.setLife(islandLife(theme, theme ? pools : []));
     if (!theme) return;
     const model = theme === "coral" ? "coral_cluster" : theme === "scrapyard" ? "salvage_tower" : "moon_mushroom";
     // All decoration lives on the rim; required paths and pickups stay open.
@@ -339,7 +346,7 @@ export class World {
       object.rotation.y = -angle;
       this.mapLandmarks.push(p);
     }
-    for (const [x, z, radius] of [[-10, -1, 2.5], [7, -10, 2.5], [9, 9, 1.7]]) {
+    for (const [x, z, radius] of pools) {
       const pool = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), new THREE.MeshStandardMaterial({ color: theme === "scrapyard" ? 0x705bc6 : 0x399cae, emissive: theme === "moonpool" ? 0x164f76 : 0x000000, roughness: 0.3 }));
       pool.rotation.x = -Math.PI / 2; pool.position.set(x, 0.46, z); this.mission.add(pool);
     }
@@ -407,13 +414,17 @@ export class World {
     const object = source.clone(true);
     object.position.set(position.x, position.y ?? 0.55, position.z);
     object.scale.setScalar(actorScale(name, scale, nativeScale));
-    object.traverse(child => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
     parent.add(object);
+    object.updateMatrixWorld(true);
+    object.traverse(child => {
+      if (!child.isMesh) return;
+      // Parts a few centimetres across (eyes, buttons, antenna tips) would cost a shadow-pass draw
+      // each for a shadow nobody can see; only parts larger than ~14 cm cast.
+      const geometry = child.geometry;
+      if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+      child.castShadow = name.startsWith("journey_") || geometry.boundingSphere.radius * child.getWorldScale(this.shadowScale ??= new THREE.Vector3()).x >= .14;
+      child.receiveShadow = true;
+    });
     object.userData.limbs = [];
     object.userData.quadruped = ["bolt", "zombie_dog"].includes(name);
     object.userData.tails = [];
@@ -515,7 +526,7 @@ export class World {
   createMarker(position, color = 0xffd166, radius = 1.2) {
     const group = new THREE.Group();
     // Keep the objective footprint, but remove the heavy ring and tall light wall.
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.065, 6, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.98 }));
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.065, 4, 32), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.98 }));
     ring.rotation.x = Math.PI / 2;
     ring.position.y = 0.62;
     group.add(ring);
@@ -599,9 +610,11 @@ export class World {
 
   setQuality(value) {
     this.settings.quality = value;
-    this.quality = resolveQuality(value, innerWidth, this.softwareRenderer);
+    const chosen = resolveQuality(value, innerWidth, this.softwareRenderer);
+    this.quality = value === "auto" ? this.governor.limit(chosen) : chosen;
     const profile = QUALITY_PROFILES[this.quality];
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.pixelRatio));
+    this.renderer.setPixelRatio(this.pixelRatioFor(profile));
+    this.environmentDirty = true;
     this.renderer.shadowMap.enabled = profile.shadows;
     if (this.sun) {
       this.sun.castShadow = profile.shadows;
@@ -613,13 +626,30 @@ export class World {
       }
     }
     this.pipeline.configure(this.quality);
+    this.life?.setBudget(LIFE_BUDGET[this.quality]);
     this.resize();
+  }
+
+  // "Auto" lowers resolution, then the tier, on a device that cannot hold the frame rate.
+  pixelRatioFor(profile) { return Math.min(devicePixelRatio, profile.pixelRatio) * (this.settings.quality === "auto" ? this.governor.scale : 1); }
+
+  adaptQuality(dt, playing) {
+    if (this.settings.quality !== "auto") return;
+    if (this.governor.sample(dt, playing, this.quality)) { saveGovernor(this.governor); this.setQuality("auto"); }
+  }
+
+  // Ambient creatures, motes and plant sway for the current place (see life-data.js).
+  setLife(recipe, scenery = null) {
+    this.life?.dispose();
+    this.life = null;
+    if (!recipe || !(recipe.swarms?.length || recipe.motes?.length || recipe.sway)) return;
+    this.life = new Life(this.scene, recipe, { scenery, budget: LIFE_BUDGET[this.quality] ?? LIFE_BUDGET.medium, sizeScale: this.camera.aspect < 1 ? 1.35 : 1 });
   }
 
   resize() {
     // 'auto' follows rotation and window changes; an explicit choice never changes by itself.
-    if (this.settings.quality === "auto" && this.quality && resolveQuality("auto", innerWidth, this.softwareRenderer) !== this.quality) return this.setQuality("auto");
-    const ratio = Math.min(devicePixelRatio, QUALITY_PROFILES[this.quality || "low"].pixelRatio);
+    if (this.settings.quality === "auto" && this.quality && this.governor.limit(resolveQuality("auto", innerWidth, this.softwareRenderer)) !== this.quality) return this.setQuality("auto");
+    const ratio = this.pixelRatioFor(QUALITY_PROFILES[this.quality || "low"]);
     if (this.renderer.getPixelRatio() !== ratio) this.renderer.setPixelRatio(ratio);
     const width = Math.max(1, this.canvas.clientWidth || innerWidth);
     const height = Math.max(1, this.canvas.clientHeight || innerHeight);
@@ -644,6 +674,7 @@ export class World {
     if (this.foam) this.foam.scale.setScalar(1 + Math.sin(this.clock * 0.65) * 0.012);
     this.water.material.color.setHSL(0.55 + Math.sin(this.clock * 0.15) * 0.012, 0.73, 0.42);
     if (this.beamPivot) this.beamPivot.rotation.y += dt * 0.22;
+    if (this.clouds && !reducedMotion) this.clouds.rotation.y = Math.sin(this.clock * .01) * .12;
     for (const marker of this.markers) if (marker.visible && !reducedMotion) {
       marker.userData.ring.rotation.z += dt * 0.8;
       marker.userData.ring.material.opacity = 0.83 + Math.sin(this.clock * 4) * 0.12;
@@ -720,6 +751,12 @@ export class World {
     this.sky.follow(this.camera);
     const height = this.renderer.getDrawingBufferSize(this.drawingSize).y;
     this.particles.material.uniforms.scale.value = height / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
+    if (this.life) {
+      // Creatures part around KAI (or the workshop's preview robot) and the camera's line to it.
+      const hero = this.previewActor ? this.previewActor.position : focus && !this.celebration ? focus : null;
+      const threat = hero ? Object.assign(this.lifeThreat ??= {}, { x: hero.x, y: 1, z: hero.z }) : null;
+      this.life.update(dt, { camera: this.camera, threat, quiet: reducedMotion });
+    }
     this.refreshEnvironmentMap();
     this.pipeline.render();
   }
@@ -742,6 +779,8 @@ export class World {
     }
     this.flash = Math.max(0, (this.flash || 0) - dt * 3.2);
     this.sky.uniforms.flash.value = this.flash * .55;
-    this.hemi.intensity = (this.atmosphere?.hemi ?? .5) + this.flash * 1.4;
+    // Without image-based lighting (low tier) the hemisphere also carries the sky's ambient share.
+    const ambient = QUALITY_PROFILES[this.quality || "low"].ibl ? 0 : (this.atmosphere?.environment ?? .3) * 1.5;
+    this.hemi.intensity = (this.atmosphere?.hemi ?? .5) + ambient + this.flash * 1.4;
   }
 }

@@ -62,28 +62,77 @@ def set_mat(obj, mat):
     return obj
 
 
-def cube(name, loc, scale, mat, bevel=0.12, parent=None):
+# Triangle budgets follow on-screen size (lightweight-game-objects skill). On a 390x844 phone a
+# robot is ~60-150 px tall (~50 px per metre), so a 2 cm chamfer is one pixel and a part under
+# ~8 cm is a few pixels: those get no bevel, mid-size parts one bevel segment, and only chunky,
+# silhouette-sized parts two. Hero parts seen in the workshop close-up keep a little more.
+def bevel_segments(scale, bevel, hero=False):
+    size, thin = max(scale), min(scale)
+    if bevel < (0.015 if hero else 0.02) or size < (0.05 if hero else 0.08):
+        return 0
+    return 2 if size >= (0.2 if hero else 0.3) and thin >= 0.04 and bevel >= 0.04 else 1
+
+
+def sphere_subdivisions(scale):
+    """Icosphere level: 3 = 320 tris (bodies), 2 = 80 (eyes, bulbs), 1 = 20 (rivets, freckles)."""
+    size = max(scale)
+    return 3 if size >= 0.3 else 2 if size >= 0.1 else 1
+
+
+def round_sides(radius):
+    """Sides for cylinders and rods of a given radius (stems and pistons need 6)."""
+    return 16 if radius >= 0.3 else 12 if radius >= 0.1 else 8 if radius >= 0.05 else 6
+
+
+def cube_uvs(mesh, half):
+    """Blender's default cube unwrap, evaluated per face from its dominant normal axis."""
+    layer = mesh.uv_layers.new(name="UVMap")
+    for poly in mesh.polygons:
+        axis = max(range(3), key=lambda k: (abs(poly.normal[k]), -k))
+        positive = poly.normal[axis] >= 0
+        for index in poly.loop_indices:
+            co = mesh.vertices[mesh.loops[index].vertex_index].co
+            x, y, z = (co[k] / half[k] for k in range(3))
+            if axis == 0:
+                uv = (.375 + (z + 1) * .125, .5 + (1 - y) * .125 if positive else (y + 1) * .125)
+            elif axis == 1:
+                uv = (.375 + (z + 1) * .125, .25 + (x + 1) * .125 if positive else .75 + (1 - x) * .125)
+            else:
+                uv = (.625 + (1 - x) * .125 if positive else .125 + (x + 1) * .125, .5 + (1 - y) * .125)
+            layer.data[index].uv = uv
+
+
+def cube(name, loc, scale, mat, bevel=0.12, parent=None, segments=None):
     bpy.ops.mesh.primitive_cube_add(location=loc)
     obj = bpy.context.object
     obj.name = name
     obj.scale = scale
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    if bevel:
+    segments = bevel_segments(scale, bevel) if segments is None else segments
+    if bevel and segments:
+        # Blender's bevel merges UVs in a run-dependent order (1-ULP differences between
+        # processes), which made rebuilt GLBs differ. Bevel without UVs, then project the
+        # primitive's own cube layout back on, so every rebuild is byte-identical.
+        obj.data.uv_layers.remove(obj.data.uv_layers[0])
         mod = obj.modifiers.new("Soft bevel", "BEVEL")
         mod.width = bevel
-        mod.segments = 2
+        mod.segments = segments
         mod.harden_normals = True
         for face in obj.data.polygons:
             face.use_smooth = True
         normals = obj.modifiers.new("Panel normals", "WEIGHTED_NORMAL")
         normals.keep_sharp = True
+        for modifier in list(obj.modifiers):
+            bpy.ops.object.modifier_apply(modifier=modifier.name)
+        cube_uvs(obj.data, scale)
     set_mat(obj, mat)
     obj.parent = parent
     return obj
 
 
-def sphere(name, loc, scale, mat, parent=None):
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=3 if max(scale) >= 0.3 else 2, radius=1, location=loc)
+def sphere(name, loc, scale, mat, parent=None, subdivisions=None):
+    level = sphere_subdivisions(scale) if subdivisions is None else subdivisions
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=level, radius=1, location=loc)
     obj = bpy.context.object
     obj.name = name
     obj.scale = scale
@@ -95,7 +144,8 @@ def sphere(name, loc, scale, mat, parent=None):
     return obj
 
 
-def cylinder(name, loc, radius, depth, mat, parent=None, vertices=16, rotation=(0, 0, 0)):
+def cylinder(name, loc, radius, depth, mat, parent=None, vertices=None, rotation=(0, 0, 0)):
+    vertices = round_sides(radius) if vertices is None else vertices
     bpy.ops.mesh.primitive_cylinder_add(vertices=vertices, radius=radius, depth=depth, location=loc, rotation=rotation)
     obj = bpy.context.object
     obj.name = name
@@ -153,9 +203,8 @@ def mesh_object(name, verts, faces, mat, parent):
     return obj
 
 
-def hull(name, sections, mat, parent, loc=(0, 0, 0), rotation=(0, 0, 0), power=0.55):
+def hull(name, sections, mat, parent, loc=(0, 0, 0), rotation=(0, 0, 0), power=0.55, count=24):
     """Loft rounded rectangular cross-sections, not a scaled primitive box."""
-    count = 24
     verts, faces = [], []
     for z, width, depth in sections:
         for i in range(count):
@@ -178,14 +227,14 @@ def hull(name, sections, mat, parent, loc=(0, 0, 0), rotation=(0, 0, 0), power=0
     return obj
 
 
-def rod(name, start, end, radius, mat, parent, vertices=12):
+def rod(name, start, end, radius, mat, parent, vertices=None):
     a, b = Vector(start), Vector(end)
     obj = cylinder(name, (a + b) / 2, radius, (b - a).length, mat, parent, vertices)
     obj.rotation_euler = (b - a).to_track_quat("Z", "Y").to_euler()
     return obj
 
 
-def tapered_tube(name, points, radii, mat, parent, sides=10):
+def tapered_tube(name, points, radii, mat, parent, sides=10, caps=True):
     """Continuous bent organic surface with a shrinking tip."""
     verts, faces = [], []
     for i, point in enumerate(points):
@@ -198,7 +247,8 @@ def tapered_tube(name, points, radii, mat, parent, sides=10):
         for j in range(sides):
             a, b = i * sides + j, i * sides + (j + 1) % sides
             faces.append((a, b, b + sides, a + sides))
-    faces.extend([tuple(reversed(range(sides))), tuple(range(len(verts) - sides, len(verts)))])
+    if caps:
+        faces.extend([tuple(reversed(range(sides))), tuple(range(len(verts) - sides, len(verts)))])
     return mesh_object(name, verts, faces, mat, parent)
 
 
@@ -206,30 +256,38 @@ def robot(name="KAI_Robot", hostile=False):
     r = root(name)
     shell = CORAL if hostile else WHITE
     light = ORANGE if hostile else CYAN
+    # KAI is also the workshop close-up (~300-400 px tall), so its larger panels keep a second
+    # bevel segment and its limbs 16 sides; the scout is only ever seen in play (~60-150 px).
+    hero = not hostile
+    round16 = 16 if hero else 12
+
+    def box(part, loc, scale, mat, bevel, parent):
+        return cube(part, loc, scale, mat, bevel, parent, segments=bevel_segments(scale, bevel, hero))
+
     hull("Torso", [(0.85, .27, .20), (.91, .31, .24), (1.23, .34, .25), (1.62, .41, .25), (1.77, .37, .22), (1.86, .26, .17)], shell, r)
-    cube("ChestSocket", (0, -.265, 1.43), (.20, .025, .19), NAVY, .05, r)
-    cylinder("ReactorRim", (0, -.30, 1.43), .145, .045, STEEL, r, 24, (math.pi / 2, 0, 0))
-    cylinder("ReactorLens", (0, -.329, 1.43), .105, .02, light, r, 24, (math.pi / 2, 0, 0))
+    box("ChestSocket", (0, -.265, 1.43), (.20, .025, .19), NAVY, .05, r)
+    cylinder("ReactorRim", (0, -.30, 1.43), .145, .045, STEEL, r, round16, (math.pi / 2, 0, 0))
+    cylinder("ReactorLens", (0, -.329, 1.43), .105, .02, light, r, round16, (math.pi / 2, 0, 0))
     for side in (-1, 1):
-        cube("ChestPlateSeam", (side * .26, -.251, 1.58), (.025, .016, .13), NAVY, .015, r)
-        cube("ChestID", (side * .29, -.269, 1.69), (.07, .012, .018), GOLD, .005, r)
-    cylinder("Neck", (0, 0, 1.92), 0.14, 0.16, NAVY, r)
+        box("ChestPlateSeam", (side * .26, -.251, 1.58), (.025, .016, .13), NAVY, .015, r)
+        box("ChestID", (side * .29, -.269, 1.69), (.07, .012, .018), GOLD, .005, r)
+    cylinder("Neck", (0, 0, 1.92), 0.14, 0.16, NAVY, r, round16)
     hull("Helmet", [(1.99, .25, .23), (2.04, .37, .30), (2.20, .40, .34), (2.40, .37, .30), (2.49, .29, .23)], shell, r)
-    cube("VisorFrame", (0, -0.32, 2.2), (0.34, 0.06, 0.155), NAVY, 0.06, r)
-    cube("VisorGlass", (0, -.373, 2.21), (.30, .02, .117), GLASS, .055, r)
+    box("VisorFrame", (0, -0.32, 2.2), (0.34, 0.06, 0.155), NAVY, 0.06, r)
+    box("VisorGlass", (0, -.373, 2.21), (.30, .02, .117), GLASS, .055, r)
     for side in (-1, 1):
-        cylinder("HelmetAxle", (side * .398, 0, 2.21), .115, .055, STEEL, r, 16, (0, math.pi / 2, 0))
-        cube("TempleVent", (side * .376, .14, 2.32), (.022, .07, .028), NAVY, .01, r)
-    cube("HelmetCrest", (0, .015, 2.491), (.05, .18, .012), GOLD, .01, r)
+        cylinder("HelmetAxle", (side * .398, 0, 2.21), .115, .055, STEEL, r, round16, (0, math.pi / 2, 0))
+        box("TempleVent", (side * .376, .14, 2.32), (.022, .07, .028), NAVY, .01, r)
+    box("HelmetCrest", (0, .015, 2.491), (.05, .18, .012), GOLD, .01, r)
     for x in (-0.15, 0.15):
-        cube("Optic", (x * 0.8, -0.397, 2.22), (0.06, 0.012, 0.045), light, 0.018, r)
-    cube("Smile", (0, -0.382, 2.12), (0.08, 0.016, 0.012), light, 0.01, r)
-    cube("BellyPanel", (0, -0.26, 1.04), (0.28, 0.02, 0.09), NAVY, 0.04, r)
+        box("Optic", (x * 0.8, -0.397, 2.22), (0.06, 0.012, 0.045), light, 0.018, r)
+    box("Smile", (0, -0.382, 2.12), (0.08, 0.016, 0.012), light, 0.01, r)
+    box("BellyPanel", (0, -0.26, 1.04), (0.28, 0.02, 0.09), NAVY, 0.04, r)
     for x in (-0.2, 0, 0.2):
-        cube("PowerVent", (x * 0.8, -0.285, 1.04), (0.035, 0.012, 0.04), light, 0.012, r)
-    cube("BackPanel", (0, 0.258, 1.42), (0.27, 0.02, 0.29), NAVY, 0.05, r)
+        box("PowerVent", (x * 0.8, -0.285, 1.04), (0.035, 0.012, 0.04), light, 0.012, r)
+    box("BackPanel", (0, 0.258, 1.42), (0.27, 0.02, 0.29), NAVY, 0.05, r)
     for z in (1.25, 1.4, 1.55):
-        cube("CoolingVent", (0, 0.285, z), (0.19, 0.012, 0.02), light, 0.012, r)
+        box("CoolingVent", (0, 0.285, z), (0.19, 0.012, 0.02), light, 0.012, r)
     for x in (-0.32, 0.32):
         for z in (1.03, 1.7):
             sphere("PanelRivet", (x, -0.26, z), (0.025, 0.018, 0.025), GOLD, r)
@@ -239,27 +297,27 @@ def robot(name="KAI_Robot", hostile=False):
         arm = root(f"ShoulderPivot_{suffix}")
         arm.parent = r
         arm.location = (side * 0.52, 0, 1.66)
-        cylinder("UpperArm", (side * .1, 0, -.22), .115, .33, shell, arm)
-        cylinder("ElbowAxle", (side * .1, 0, -.42), .105, .27, STEEL, arm, 16, (0, math.pi / 2, 0))
-        hull("Forearm", [(-.74, .095, .1), (-.68, .14, .14), (-.48, .12, .12)], shell, arm, (side * .1, 0, 0))
-        cube("WristIndicator", (side * .1, -.14, -.6), (.05, .013, .045), light, .012, arm)
-        cube("PalmGrip", (side * .1, 0, -.82), (.12, .11, .09), NAVY, .04, arm)
+        cylinder("UpperArm", (side * .1, 0, -.22), .115, .33, shell, arm, round16)
+        cylinder("ElbowAxle", (side * .1, 0, -.42), .105, .27, STEEL, arm, round16, (0, math.pi / 2, 0))
+        hull("Forearm", [(-.74, .095, .1), (-.68, .14, .14), (-.48, .12, .12)], shell, arm, (side * .1, 0, 0), count=16)
+        box("WristIndicator", (side * .1, -.14, -.6), (.05, .013, .045), light, .012, arm)
+        box("PalmGrip", (side * .1, 0, -.82), (.12, .11, .09), NAVY, .04, arm)
         for finger in (-1, 0, 1):
-            cube("GripperDigit", (side * .1 + finger * .075, -.095, -.895), (.028, .06, .06), STEEL, .022, arm)
+            box("GripperDigit", (side * .1 + finger * .075, -.095, -.895), (.028, .06, .06), STEEL, .022, arm)
         hip = root(f"Hip_{suffix}")
         hip.parent = r
         hip.location = (side * 0.24, 0, 0.84)
-        cylinder(f"Leg_{side}", (0, 0, -0.36), 0.15, 0.72, NAVY, hip)
-        cube(f"Foot_{side}", (0, -0.10, -0.74), (0.23, 0.34, 0.10), shell, 0.08, hip)
-        cube("KneePad", (0, -0.145, -0.3), (0.14, 0.06, 0.13), shell, 0.04, hip)
-        cube("ShinPlate", (0, -.125, -.56), (.12, .055, .13), shell, .045, hip)
+        cylinder(f"Leg_{side}", (0, 0, -0.36), 0.15, 0.72, NAVY, hip, round16)
+        box(f"Foot_{side}", (0, -0.10, -0.74), (0.23, 0.34, 0.10), shell, 0.08, hip)
+        box("KneePad", (0, -0.145, -0.3), (0.14, 0.06, 0.13), shell, 0.04, hip)
+        box("ShinPlate", (0, -.125, -.56), (.12, .055, .13), shell, .045, hip)
         rod("LegPiston", (side * .14, .04, -.16), (side * .14, .04, -.65), .032, STEEL, hip)
-        cube("BootSole", (0, -.10, -.81), (.22, .33, .035), NAVY, .03, hip)
+        box("BootSole", (0, -.10, -.81), (.22, .33, .035), NAVY, .03, hip)
         for z in (-.03, .12):
-            cube("ToeTread", (0, -.30 + z, -.845), (.18, .022, .012), STEEL, .005, hip)
-        cube("BootStripe", (0, -0.415, -0.72), (0.14, 0.02, 0.028), light, 0.015, hip)
+            box("ToeTread", (0, -.30 + z, -.845), (.18, .022, .012), STEEL, .005, hip)
+        box("BootStripe", (0, -0.415, -0.72), (0.14, 0.02, 0.028), light, 0.015, hip)
     cylinder("Antenna", (0, 0, 2.65), 0.035, 0.32, NAVY, r)
-    sphere("AntennaLight", (0, 0, 2.84), (0.09, 0.09, 0.09), light, r)
+    sphere("AntennaLight", (0, 0, 2.84), (0.09, 0.09, 0.09), light, r, subdivisions=2)
     return r
 
 
@@ -268,26 +326,27 @@ def dog(hostile=False):
     shell = CORAL if hostile else WHITE
     light = ORANGE if hostile else CYAN
     hull("Ribcage", [(-.68, .21, .19), (-.5, .31, .26), (-.1, .29, .24), (.3, .34, .30), (.56, .29, .30), (.65, .18, .23)], shell, r, (0, .02, 1.04), (math.pi / 2, 0, 0), .8)
-    hull("BreastPlate", [(.74, .17, .12), (1.04, .28, .19), (1.28, .25, .18), (1.38, .13, .10)], shell, r, (0, -.5, 0))
+    hull("BreastPlate", [(.74, .17, .12), (1.04, .28, .19), (1.28, .25, .18), (1.38, .13, .10)], shell, r, (0, -.5, 0), count=16)
     cylinder("Neck", (0, -0.62, 1.37), 0.21, 0.48, NAVY, r, rotation=(0.25, 0, 0))
     torus("Collar", (0, -0.64, 1.43), 0.23, 0.055, light, r)
     hull("DogHead", [(1.46, .17, .19), (1.55, .25, .29), (1.74, .26, .30), (1.87, .19, .22), (1.91, .10, .13)], shell, r, (0, -.78, 0), power=.8)
-    hull("Muzzle", [(-.25, .13, .085), (-.20, .16, .11), (.15, .19, .13), (.25, .15, .11)], shell, r, (0, -1.12, 1.53), (-math.pi / 2, 0, 0))
+    hull("Muzzle", [(-.25, .13, .085), (-.20, .16, .11), (.15, .19, .13), (.25, .15, .11)], shell, r, (0, -1.12, 1.53), (-math.pi / 2, 0, 0), count=16)
     cube("Nose", (0, -1.37, 1.56), (0.13, 0.045, 0.08), NAVY, 0.04, r)
     cube("MouthSeam", (0, -1.31, 1.43), (0.14, 0.08, 0.018), NAVY, 0.015, r)
     for side in (-1, 1):
         sphere("EyeSocket", (side * 0.23, -0.98, 1.75), (0.075, 0.07, 0.08), NAVY, r)
-        sphere("DogOptic", (side * 0.245, -1.03, 1.76), (0.042, 0.03, 0.045), light, r)
+        sphere("DogOptic", (side * 0.245, -1.03, 1.76), (0.042, 0.03, 0.045), light, r, subdivisions=2)
         if hostile:
             cone("PointyEar", (side * 0.22, -0.6, 2.03), 0.13, 0.025, 0.4, NAVY, r, 6)
         else:
-            ear = cube("FloppyEar", (side * 0.31, -0.63, 1.73), (0.075, 0.14, 0.24), NAVY, 0.065, r)
+            # The floppy ears carry BOLT's silhouette, so they keep the soft two-segment bevel.
+            ear = cube("FloppyEar", (side * 0.31, -0.63, 1.73), (0.075, 0.14, 0.24), NAVY, 0.065, r, segments=2)
             ear.rotation_euler.y = side * 0.3
         cube("FlankPanel", (side * 0.323, 0.12, 1.05), (0.023, 0.37, 0.14), NAVY, 0.025, r)
         cube("FlankStripe", (side * 0.35, 0.12, 1.05), (0.012, 0.24, 0.033), light, 0.012, r)
         for y in (-.12, .12, .36):
             cube("FlankCoolingFin", (side * .342, y, 1.18), (.018, .015, .048), STEEL, .006, r)
-        cylinder("JawHinge", (side * .245, -.74, 1.58), .075, .04, STEEL, r, 12, (0, math.pi / 2, 0))
+        cylinder("JawHinge", (side * .245, -.74, 1.58), .075, .04, STEEL, r, rotation=(0, math.pi / 2, 0))
         rod("NeckActuator", (side * .17, -.48, 1.28), (side * .17, -.66, 1.55), .035, STEEL, r)
     cube("SpinePanel", (0, 0.08, 1.3), (0.20, 0.38, 0.025), NAVY, 0.04, r)
     for y in (-0.18, 0.08, 0.34):
@@ -298,22 +357,22 @@ def dog(hostile=False):
             hip.parent = r
             hip.location = (x, y, 0.93)
             bend = -.14 if y < 0 else .18
-            cylinder("HipAxle", (0, 0, 0), .135, .19, NAVY, hip, 16, (0, math.pi / 2, 0))
-            cylinder("HipBolt", ((-.11 if x < 0 else .11), 0, 0), .073, .035, STEEL, hip, 12, (0, math.pi / 2, 0))
+            cylinder("HipAxle", (0, 0, 0), .135, .19, NAVY, hip, rotation=(0, math.pi / 2, 0))
+            cylinder("HipBolt", ((-.11 if x < 0 else .11), 0, 0), .073, .035, STEEL, hip, rotation=(0, math.pi / 2, 0))
             rod("UpperLeg", (0, 0, -.05), (0, bend, -.38), .09, shell, hip)
-            cylinder("KneeAxle", (0, bend, -.40), .093, .19, NAVY, hip, 16, (0, math.pi / 2, 0))
+            cylinder("KneeAxle", (0, bend, -.40), .093, .19, NAVY, hip, rotation=(0, math.pi / 2, 0))
             rod("LowerLeg", (0, bend, -.43), (0, -.045, -.77), .06, STEEL, hip)
             rod("HydraulicSleeve", (0, .055, -.09), (0, bend + .075, -.35), .043, NAVY, hip)
             rod("HydraulicRam", (0, bend + .075, -.35), (0, .025, -.67), .025, STEEL, hip)
             cube("Paw", (0, -0.085, -0.85), (0.115, 0.20, 0.075), shell, 0.04, hip)
-            cube("PawPad", (0, -.085, -.91), (.11, .19, .025), NAVY, .025, hip)
+            cube("PawPad", (0, -.085, -.91), (.11, .19, .025), NAVY, .025, hip, segments=0)
             for toe in (-1, 1):
                 cube("PawToe", (toe * .057, -.26, -.845), (.04, .065, .04), STEEL, .02, hip)
     tail = root("TailPivot")
     tail.parent = r
     tail.location = (0, 0.64, 1.12)
     tube("Tail", [(0, 0, 0), (0, 0.22, 0.17), (0, 0.37, 0.44)], 0.065, NAVY, tail)
-    sphere("TailLight", (0, 0.37, 0.44), (0.075, 0.075, 0.075), light, tail)
+    sphere("TailLight", (0, 0.37, 0.44), (0.075, 0.075, 0.075), light, tail, subdivisions=2)
     return r
 
 
@@ -322,7 +381,7 @@ def drone():
     sphere("DroneCore", (0, 0, 0.38), (0.55, 0.42, 0.32), CORAL, r)
     cube("AngryVisor", (0, -0.4, 0.38), (0.3, 0.06, 0.09), ORANGE, 0.03, r)
     torus("CoreSeam", (0, 0, 0.38), 0.44, 0.032, NAVY, r)
-    sphere("DroneLens", (0, -0.475, 0.38), (0.095, 0.04, 0.095), NAVY, r)
+    sphere("DroneLens", (0, -0.475, 0.38), (0.095, 0.04, 0.095), NAVY, r, subdivisions=2)
     for x in (-0.72, 0.72):
         for y in (-0.55, 0.55):
             rod("DiagonalArm", (x * .34, y * .34, .38), (x, y, .43), .065, STEEL, r)
@@ -333,9 +392,9 @@ def drone():
     cube("BatteryHatch", (0, .04, .67), (.23, .17, .026), NAVY, .04, r)
     for x in (-.17, .17):
         for y in (-.07, .15):
-            cylinder("HatchScrew", (x, y, .70), .025, .015, STEEL, r, 8)
-    cylinder("CameraHousing", (0, -.46, .33), .13, .1, STEEL, r, 20, (math.pi / 2, 0, 0))
-    cylinder("CameraGlass", (0, -.52, .33), .09, .02, GLASS, r, 20, (math.pi / 2, 0, 0))
+            cylinder("HatchScrew", (x, y, .70), .025, .015, STEEL, r)
+    cylinder("CameraHousing", (0, -.46, .33), .13, .1, STEEL, r, 12, (math.pi / 2, 0, 0))
+    cylinder("CameraGlass", (0, -.52, .33), .09, .02, GLASS, r, 12, (math.pi / 2, 0, 0))
     return r
 
 
@@ -343,15 +402,16 @@ def lighthouse():
     r = root("LUMA_Lighthouse")
     cone("Tower", (0, 0, 3.1), 1.28, 0.78, 6.2, WHITE, r, 24)
     for z in (1.2, 2.6, 4.0):
-        cone("RedBand", (0, 0, z), 1.29 - (z - .21) * .5 / 6.2, 1.29 - (z + .21) * .5 / 6.2, .42, RED, r, 32)
+        # 24 sides like the tower, so each band sits 1 cm proud of the matching tower faces.
+        cone("RedBand", (0, 0, z), 1.29 - (z - .21) * .5 / 6.2, 1.29 - (z + .21) * .5 / 6.2, .42, RED, r, 24)
     cylinder("Gallery", (0, 0, 6.25), 1.08, 0.18, NAVY, r, 24)
     cylinder("LensRoom", (0, 0, 6.7), 0.68, 0.86, CYAN, r, 24)
     cone("Roof", (0, 0, 7.32), 0.90, 0.08, 0.65, RED, r, 24)
     sphere("BeamAnchor", (0, -0.60, 6.72), (0.10, 0.10, 0.10), CYAN, r)
     cube("Door", (0, -1.22, 0.58), (0.3, 0.07, 0.54), NAVY, 0.12, r)
     for z in (2.0, 3.4, 4.8):
-        cylinder("PortholeFrame", (0, -(1.28 - z * 0.08), z), 0.18, 0.055, NAVY, r, 20, (math.pi / 2, 0, 0))
-        cylinder("PortholeGlass", (0, -(1.32 - z * 0.08), z), 0.125, 0.03, CYAN, r, 20, (math.pi / 2, 0, 0))
+        cylinder("PortholeFrame", (0, -(1.28 - z * 0.08), z), 0.18, 0.055, NAVY, r, 12, (math.pi / 2, 0, 0))
+        cylinder("PortholeGlass", (0, -(1.32 - z * 0.08), z), 0.125, 0.03, CYAN, r, 12, (math.pi / 2, 0, 0))
     torus("GalleryRail", (0, 0, 6.53), 1.01, 0.035, NAVY, r)
     for i in range(12):
         angle = i * math.tau / 12
@@ -388,7 +448,7 @@ def rocket():
         fin.rotation_euler.z = -angle
     cylinder("Window", (0, -0.70, 4.1), 0.24, 0.08, CYAN, r, 16, (math.pi / 2, 0, 0))
     for z in (1.8, 5.5):
-        torus("HullSeam", (0, 0, z), 0.72, 0.035, NAVY, r)
+        torus("HullSeam", (0, 0, z), 0.72, 0.035, NAVY, r, major_segments=20)
     torus("WindowRim", (0, -0.76, 4.1), 0.25, 0.045, NAVY, r, (math.pi / 2, 0, 0))
     cone("EngineBell", (0, 0, 0.45), 0.52, 0.36, 0.5, NAVY, r)
     return r
@@ -413,13 +473,34 @@ def beacon():
     return r
 
 
+def pillow_normals(obj, strength=1.0):
+    """Tilt a flat card's normals outward from its centre, so one sheet shades like a soft, thick
+    blade (what the old solidified rim did to the smooth normals) at no triangle cost."""
+    mesh = obj.data
+    points = [v.co.copy() for v in mesh.vertices]
+    centre = sum(points, Vector()) / len(points)
+    up = sum((face.normal * face.area for face in mesh.polygons), Vector()).normalized()
+    normals = []
+    for point in points:
+        out = point - centre
+        out -= up * out.dot(up)
+        normals.append((up + out.normalized() * strength).normalized() if out.length > 1e-6 else up)
+    mesh.normals_split_custom_set_from_vertices(normals)
+    return obj
+
+
 def palm():
     r = root("Beach_Palm")
-    centers = [(.25 * (i / 15) ** 2, 0, i * 3.8 / 15) for i in range(16)]
-    tapered_tube("CurvedTrunk", centers, [.23 - i * .006 for i in range(16)], BROWN, r, 12)
+    # Budget ~2,000 tris for a 100-200 px tree (was 10,340): a 10-sided trunk, bark rings as open
+    # 20-tri bands instead of 288-tri tori, and single-sheet leaflets. Every material exports
+    # double-sided, so a leaflet needs no solidified back face (9 mm is far below a pixel).
+    def trunk(z):
+        return (.25 * (z / 3.8) ** 2, 0, z)
+    tapered_tube("CurvedTrunk", [trunk(i * .38) for i in range(11)], [.23 - i * .009 for i in range(11)], BROWN, r, 10)
     for i in range(1, 19):
         z = i * .195
-        torus("BarkScar", (.25 * (z / 3.8) ** 2, 0, z), .23 - z * .024, .012, SHELL, r)
+        # Same 10 sides and orientation as the trunk, standing 12 mm proud like the old ring tubes.
+        tapered_tube("BarkScar", [trunk(z - .012), trunk(z + .012)], [.242 - z * .0237] * 2, SHELL, r, 10, caps=False)
     for index in range(9):
         angle = index * math.tau / 9
         frond = root("PalmFrond")
@@ -427,18 +508,19 @@ def palm():
         frond.location = (.25, 0, 3.8)
         frond.rotation_euler.z = angle
         length = 1.8 + (index % 3) * .14
-        points = [(length * i / 12, 0, .62 * math.sin(i / 12 * math.pi) - .48 * (i / 12) ** 2) for i in range(13)]
-        tapered_tube("FrondSpine", points, [.036 * (1 - i / 13) + .005 for i in range(13)], LEAF_TIP, frond, 6)
+
+        def arc(t):
+            return (length * t, 0, .62 * math.sin(t * math.pi) - .48 * t ** 2)
+        spine = [arc(i / 8) for i in range(9)]
+        tapered_tube("FrondSpine", spine, [.036 * (1 - i / 8.67) + .005 for i in range(9)], LEAF_TIP, frond, 4)
         for i in range(1, 12):
             t = i / 12
-            x, _, z = points[i]
+            x, _, z = arc(t)
             width = .42 * math.sin(t * math.pi) + .07
             for side in (-1, 1):
                 verts = [(x - .1, 0, z), (x + .11, 0, z), (x + .22, side * width * .65, z - .08), (x + .32, side * width, z - .25), (x + .06, side * width * .7, z - .10)]
-                leaf = mesh_object("PalmLeaflet", verts, [(0, 1, 2), (0, 2, 4), (2, 3, 4)], LEAF if i % 3 else LEAF_TIP, frond)
-                # Actual two-sided thin leaf, exported without runtime overrides.
-                solid = leaf.modifiers.new("Leaf thickness", "SOLIDIFY")
-                solid.thickness = .009
+                faces = [(0, 1, 2), (0, 2, 4), (2, 3, 4)] if side > 0 else [(0, 2, 1), (0, 4, 2), (2, 4, 3)]
+                pillow_normals(mesh_object("PalmLeaflet", verts, faces, LEAF if i % 3 else LEAF_TIP, frond))
     for x, y in [(.15, .13), (.35, -.11), (.05, -.17)]:
         sphere("Coconut", (x, y, 3.65), (.14, .14, .19), BROWN, r)
     bpy.context.view_layer.update()
@@ -453,8 +535,11 @@ def palm():
     return r
 
 
-def torus(name, loc, major, minor, mat, parent, rotation=(0, 0, 0)):
-    bpy.ops.mesh.primitive_torus_add(major_radius=major, minor_radius=minor, major_segments=24, minor_segments=6, location=loc, rotation=rotation)
+def torus(name, loc, major, minor, mat, parent, rotation=(0, 0, 0), major_segments=None, minor_segments=None):
+    # Thin seams and rails read as lines on a phone: 3-4 sides around the tube are enough.
+    major_segments = major_segments or (24 if major >= 0.6 else 16 if major >= 0.2 else 12)
+    minor_segments = minor_segments or (6 if minor >= 0.08 else 4 if minor >= 0.02 else 3)
+    bpy.ops.mesh.primitive_torus_add(major_radius=major, minor_radius=minor, major_segments=major_segments, minor_segments=minor_segments, location=loc, rotation=rotation)
     obj = bpy.context.object
     obj.name = name
     for face in obj.data.polygons:
@@ -469,7 +554,7 @@ def octopus():
     sphere("Mantle", (0, 0, 0.72), (0.62, 0.56, 0.7), PURPLE, r)
     for x in (-0.22, 0.22):
         sphere("EyeWhite", (x, -0.5, 0.83), (0.14, 0.1, 0.18), WHITE, r)
-        sphere("Eye", (x, -0.59, 0.84), (0.07, 0.045, 0.09), NAVY, r)
+        sphere("Eye", (x, -0.59, 0.84), (0.07, 0.045, 0.09), NAVY, r, subdivisions=2)
         sphere("EyeGlint", (x - 0.02, -0.631, 0.875), (0.024, 0.012, 0.028), PEARL, r)
         sphere("Cheek", (x * 1.5, -0.47, 0.64), (0.09, 0.035, 0.05), PINK, r)
     tube("OctoSmile", [(-0.075, -0.55, 0.65), (0, -0.57, 0.61), (0.075, -0.55, 0.65)], 0.018, NAVY, r)
@@ -481,13 +566,13 @@ def octopus():
         arm = root(f"Tentacle_{i}")
         arm.parent = r
         arm.rotation_euler.z = angle
-        points = []
-        for j in range(13):
-            t = j / 12
-            points.append((.27 + .89 * t, .16 * math.sin(t * math.pi * 1.5), .24 - .13 * math.sin(t * math.pi) + .12 * t ** 4))
-        tapered_tube("TaperedArm", points, [.18 * (1 - j / 13) + .012 for j in range(13)], PURPLE, arm)
-        for j in range(2, 12, 2):
-            x, y, z = points[j]
+        def curl(t):
+            return (.27 + .89 * t, .16 * math.sin(t * math.pi * 1.5), .24 - .13 * math.sin(t * math.pi) + .12 * t ** 4)
+        # Eight sides and ten rings keep the curl; the old 10 x 13 arm cost 256 tris each.
+        tapered_tube("TaperedArm", [curl(j / 9) for j in range(10)], [.18 * (1 - j / 9.75) + .012 for j in range(10)], PURPLE, arm, 8)
+        # Four 20-tri suckers per arm (the fifth, near the tip, was under a pixel).
+        for j in range(2, 10, 2):
+            x, y, z = curl(j / 12)
             sphere("Sucker", (x, y - .1 * (1 - j / 13), z + .04), (.055 * (1 - j / 16), .032, .026), PEARL, arm)
     return r
 
@@ -530,7 +615,7 @@ def starfish():
             raise ValueError("Starfish detail outside the sculpted shell")
         return (x, y, point.z + lift)
     for x in (-0.16, 0.16):
-        sphere("StarEye", on_shell(x, -.12, .027), (.055, .055, .045), NAVY, r)
+        sphere("StarEye", on_shell(x, -.12, .027), (.055, .055, .045), NAVY, r, subdivisions=2)
     tube("StarSmile", [on_shell(-.07, -.25, .012), on_shell(0, -.29, .012), on_shell(.07, -.25, .012)], .017, NAVY, r)
     for i in range(5):
         angle = i * math.tau / 5 + math.pi / 2
@@ -545,15 +630,15 @@ def snail():
     sphere("Shell", (0, 0.13, 0.76), (0.66, 0.62, 0.69), PINK, r)
     for side in (-1, 1):
         points = []
-        for i in range(49):
-            t = i / 48
+        for i in range(29):
+            t = i / 28
             radius = 0.04 + t * 0.4
             angle = t * math.tau * 1.6
             points.append((side * (0.665 - radius * radius * 0.8), 0.13 + math.cos(angle) * radius, 0.79 + math.sin(angle) * radius))
         tube("ShellSpiral", points, 0.04, GOLD, r)
         cylinder("EyeStalk", (side * 0.22, -0.73, 0.62), 0.055, 0.64, MINT, r, 8)
         sphere("SnailEye", (side * 0.22, -0.73, 0.99), (0.13, 0.13, 0.13), WHITE, r)
-        sphere("Pupil", (side * 0.22, -0.85, 1.0), (0.065, 0.04, 0.07), NAVY, r)
+        sphere("Pupil", (side * 0.22, -0.85, 1.0), (0.065, 0.04, 0.07), NAVY, r, subdivisions=2)
     tube("SnailSmile", [(-0.12, -0.99, 0.33), (0, -1.035, 0.29), (0.12, -0.99, 0.33)], 0.018, NAVY, r)
     for y in (-0.3, 0, 0.3, 0.6):
         for side in (-1, 1):
@@ -564,8 +649,11 @@ def snail():
 def clam():
     r = root("Clam_Repair_Station")
     def valve(name, parent, center, upper):
+        # 18 ridges x 4 samples keep the scalloped rim; 5 rings (was 8) hold the dome. One
+        # double-sided sheet plus the solidified rim only: every material exports double-sided,
+        # so the old full inner wall doubled the cost for a surface the sheet already shows.
         verts, faces = [(0, 0, .24 if upper else -.14)], []
-        rings, steps = 8, 72
+        rings, steps = 5, 72
         for j in range(1, rings + 1):
             radius = j / rings
             for i in range(steps):
@@ -582,8 +670,9 @@ def clam():
                 faces.append((a, a + steps, b + steps, b))
         obj = mesh_object(name, verts, faces, SHELL, parent)
         obj.location = center
-        solid = obj.modifiers.new("Shell wall", "SOLIDIFY")
+        solid = obj.modifiers.new("Shell lip", "SOLIDIFY")
         solid.thickness = .025
+        solid.use_rim_only = True
         return obj
     valve("LowerShell", r, (0, 0, .25), False)
     lid = root("ClamLid")
@@ -594,7 +683,7 @@ def clam():
     torus("PearlSeat", (0, -0.12, 0.32), 0.31, 0.045, GOLD, r)
     sphere("RepairPearl", (0, -0.12, 0.43), (0.3, 0.3, 0.3), PEARL, r)
     for x in (-0.16, 0.16):
-        sphere("PearlEye", (x, -0.38, 0.48), (0.055, 0.045, 0.06), NAVY, r)
+        sphere("PearlEye", (x, -0.38, 0.48), (0.055, 0.045, 0.06), NAVY, r, subdivisions=2)
     return r
 
 
@@ -602,9 +691,9 @@ def coral_cluster():
     r = root("Coral_Cluster")
     sphere("CoralRock", (0, 0, 0.13), (1.05, 0.7, 0.28), PURPLE, r)
     for i, (x, y, h) in enumerate([(-0.55, 0, 1.4), (0, 0.2, 2.0), (0.55, -0.1, 1.1)]):
-        tapered_tube("CoralStem", [(x, y, 0), (x - .08, y, h * .4), (x + .05, y, h * .8), (x, y, h)], [.17, .13, .09, .025], PINK, r)
+        tapered_tube("CoralStem", [(x, y, 0), (x - .08, y, h * .4), (x + .05, y, h * .8), (x, y, h)], [.17, .13, .09, .025], PINK, r, 8)
         for side in (-1, 1):
-            tapered_tube("CoralBranch", [(x, y, h * .45), (x + side * .22, y, h * .6), (x + side * .36, y, h * .88), (x + side * .33, y, h * 1.02)], [.1, .09, .055, .015], PINK, r)
+            tapered_tube("CoralBranch", [(x, y, h * .45), (x + side * .22, y, h * .6), (x + side * .36, y, h * .88), (x + side * .33, y, h * 1.02)], [.1, .09, .055, .015], PINK, r, 8)
     return r
 
 
@@ -644,7 +733,7 @@ def software_disc():
     r = root("Software_CD")
     # A thin optical disc with a real center hole and iridescent data sectors.
     verts, faces = [], []
-    segments = 48
+    segments = 36  # six data sectors of six faces each (was 48 = 6 x 8)
     for depth, radius in [(-0.035, 0.14), (-0.035, 0.63), (0.035, 0.63), (0.035, 0.14)]:
         for i in range(segments):
             angle = i * math.tau / segments
@@ -661,10 +750,13 @@ def software_disc():
     for mat in [PEARL, PINK, CYAN, GOLD, MINT, PURPLE]:
         mesh.materials.append(mat)
     for face in mesh.polygons:
-        face.material_index = 1 + face.index // 8 % 5 if face.index < segments else 0
+        face.material_index = 1 + face.index // 6 % 5 if face.index < segments else 0
     for depth in (-0.042, 0.042):
-        torus("DiscHub", (0, depth, 0.65), 0.155, 0.015, NAVY, r, (math.pi / 2, 0, 0))
-        torus("DataTrack", (0, depth, 0.65), 0.48, 0.008, PEARL, r, (math.pi / 2, 0, 0))
+        torus("DiscHub", (0, depth, 0.65), 0.155, 0.015, NAVY, r, (math.pi / 2, 0, 0), major_segments=18)
+        # The data track is a hairline: a flat 72-tri ring 7 mm above the face reads like the old
+        # 288-tri tube and stays as round as the disc's 36 sides.
+        track = [(math.cos(i * math.tau / 36) * radius, depth, 0.65 + math.sin(i * math.tau / 36) * radius) for radius in (0.472, 0.488) for i in range(36)]
+        mesh_object("DataTrack", track, [(i, (i + 1) % 36, 36 + (i + 1) % 36, 36 + i) for i in range(36)], PEARL, r)
     return r
 
 
@@ -686,7 +778,7 @@ def twin_thrusters():
     for side in (-1, 1):
         cylinder("ThrusterTank", (side * 0.35, 0.55, 1.42), 0.2, 0.95, GOLD, r, 12)
         for z in (1.12, 1.7):
-            torus("TankCollar", (side * 0.35, 0.55, z), 0.2, 0.032, NAVY, r)
+            torus("TankCollar", (side * 0.35, 0.55, z), 0.2, 0.032, NAVY, r, major_segments=12)
         cube("FuelGauge", (side * 0.35, 0.765, 1.43), (0.06, 0.015, 0.17), CYAN, 0.015, r)
         cone("ThrusterGlow", (side * 0.35, 0.55, 0.79), 0.03, 0.16, 0.4, CYAN, r, 8)
     return r
@@ -694,7 +786,7 @@ def twin_thrusters():
 
 def halo_antenna():
     r = root("Halo_Antenna")
-    torus("Halo", (0, 0, 2.96), 0.54, 0.095, PINK, r)
+    torus("Halo", (0, 0, 2.96), 0.54, 0.095, PINK, r, major_segments=20)
     for side in (-1, 1):
         cylinder("HaloSupport", (side * 0.35, 0, 2.68), 0.045, 0.5, GOLD, r, 8)
     sphere("HaloStar", (0, 0, 3.05), (0.14, 0.14, 0.14), CYAN, r)
@@ -720,11 +812,11 @@ def starship():
         bevel.width, bevel.segments = .035, 2
         tube("AileronSeam", [(side * .68, .65, 1.012), (side * 1.46, .8, 1.012)], .016, NAVY, r)
         cube("WingTipLight", (side * 1.55, .66, 1.015), (.03, .12, .018), ORANGE if side < 0 else CYAN, .015, r)
-        cylinder("EnginePod", (side * 0.86, 0.57, 0.83), 0.23, 0.75, NAVY, r)
+        cylinder("EnginePod", (side * 0.86, 0.57, 0.83), 0.23, 0.75, NAVY, r, 16)
         torus("EngineRim", (side * 0.86, 0.57, 0.47), 0.23, 0.045, GOLD, r)
         for z in (.62, .76, .9, 1.04):
             torus("EngineCoolingRing", (side * .86, .57, z), .235, .018, STEEL, r)
-        cylinder("TurbineIntake", (side * .86, .57, 1.22), .2, .035, GLASS, r, 24)
+        cylinder("TurbineIntake", (side * .86, .57, 1.22), .2, .035, GLASS, r, 16)
         for i in range(8):
             angle = i * math.tau / 8
             blade = cube("IntakeBlade", (side * .86 + math.cos(angle) * .12, .57 + math.sin(angle) * .12, 1.245), (.065, .015, .009), STEEL, .006, r)
@@ -856,10 +948,11 @@ for asset_name, asset_root in roots.items():
                    "triangles": triangles, "meshes": len(meshes)})
     asset_root.location = original_location
 
+# newline="\n": the repo stores text with LF, and Python on Windows would otherwise write CRLF.
 (OUT_DIR / "manifest.json").write_text(json.dumps({
-    "generator": "Blender 4.5.3 LTS / tools/blender/build_assets.py",
+    "generator": f"Blender {bpy.app.version_string} / tools/blender/build_assets.py",
     "source": "assets/blender/robot_beach_assets.blend",
     "assets": report,
-}, indent=2), encoding="utf-8")
+}, indent=2), encoding="utf-8", newline="\n")
 
 print(json.dumps(report, indent=2))

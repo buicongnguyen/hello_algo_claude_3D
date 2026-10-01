@@ -76,10 +76,11 @@ try {
   if (assets.loaded !== 42 || assets.failed.length || !assets.actualBlender || assets.limbs !== 4) throw new Error(`Blender asset/pivot regression: ${JSON.stringify(assets)}`);
   const art = await page.evaluate(() => {
     const { world } = window.__ROBOT_BEACH__;
-    return { environment: Boolean(world.scene.environment), normal: Boolean(world.models.get("kai").getObjectByName("Torso").material.normalMap),
+    return { quality: world.quality, environment: Boolean(world.scene.environment), normal: Boolean(world.models.get("kai").getObjectByName("Torso").material.normalMap),
       ...world.renderer.info.render };
   });
-  if (!art.environment || !art.normal || art.calls > 450 || art.triangles > 400_000) throw new Error(`Art rendering budget or surfaces failed: ${JSON.stringify(art)}`);
+  // The low tier (software WebGL picks it) deliberately lights without the sky reflection map.
+  if (art.environment !== (art.quality !== "low") || !art.normal || art.calls > 450 || art.triangles > 400_000) throw new Error(`Art rendering budget or surfaces failed: ${JSON.stringify(art)}`);
   console.log(`Mission art check: ${JSON.stringify(art)}`);
   if (modelRequests.length !== 42 || modelRequests.some(url => !/\.glb\?v=[a-f0-9]{16}$/.test(url))) throw new Error("Models are not using content-versioned URLs");
   const modelScale = await page.evaluate(() => window.__ROBOT_BEACH__.game.player.object.scale.y);

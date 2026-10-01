@@ -170,6 +170,104 @@ A second review covered gameplay logic, rendering, UI and accessibility, and the
 - A 16-check UI script passes: focus, inert state, Escape, reduced motion and Medium quality.
 - In-game captures of the rebuilt city, orbit, abyss, reef, home, countryside and moon show no console errors and hold 60 fps.
 
+## 5c. Light living details and lighter assets
+
+This pass applies the `lightweight-game-objects` approach: put detail where the pixels are, keep colour in vertices and motion in maths, draw repeated things once, and measure. It measures first, then lightens what is heavy, then adds life that costs almost nothing.
+
+**What the audit found** (phone size, 390×844):
+
+- Tiny parts carried thousands of triangles:
+  - Antenna and its light: 1,144 each on every robot.
+  - Bark scars on a palm: 5,184.
+  - Starfish, snail and mushroom freckles: 800–1,800.
+  - Clam shells: 2,304 each.
+- Robots drew 18–22 parts each.
+- On the low tier, actors were 139 of 171 draw calls.
+- On a weak-GPU proxy (SwiftShader), image-based lighting was the largest per-pixel cost. Turning it off took the low tier from 14.5 to 32.5 fps.
+
+**Lighter existing items**
+
+- **Triangle trim:** the 25 robot and prop assets went from **80,432 to 37,042 triangles (−54%)** and from 2.51 to 1.47 MB.
+  - Silhouettes, every pivot, every material and every name the code relies on are unchanged.
+  - `build_assets.py` now picks detail by on-screen size: bevel segments by part size, sphere detail 320 / 80 / 20 by size, and fewer sides on small cylinders and rings.
+  - Eyes and light bulbs stay round.
+  - A side-effect fix: Blender's bevel modifier wrote slightly different UVs on every run, so asset rebuilds were never byte-stable. Bevelled boxes now get a re-projected cube layout, and three full exports are byte-identical.
+  - `tests/asset-budget.test.js` gives every asset a ceiling about 8% above its new count.
+
+  | Asset | Triangles |
+  |---|---|
+  | KAI (hero, close-up in the Workshop) | 7,092 → 3,340 |
+  | Rust Scout | 7,092 → 2,780 |
+  | BOLT / zombie dog | 6,876 / 6,700 → 2,980 / 2,804 |
+  | Palm | 10,340 → 2,022 |
+  | Octopus | 6,472 → 2,692 |
+  | Clam | 5,376 → 2,192 |
+  | Starship | 7,300 → 3,172 |
+  | Rust drone | 3,424 → 1,712 |
+  | Software disc | 1,536 → 648 |
+  | Salvage tower | 1,584 → 720 |
+- **Low "toy" tier:** the low tier lights with the hemisphere alone, brightened by the sky's ambient share, instead of the sky reflection map. On SwiftShader at phone size:
+  - beach: 8–10 → 18–20 fps;
+  - reef: 12.5 → 21 fps.
+- **Adaptive Auto quality** (`src/governor.js`, after Zoo Garden):
+  - Three slow seconds while playing lower resolution in 15% steps to 0.7×, then the tier.
+  - Fast seconds win resolution back.
+  - The result is stored per device, not in the save. Choosing Auto again re-measures.
+- **Island clouds:** 28 puffs are now one instanced mesh, one geometry and one draw call (previously 28 of each), drifting slowly.
+- **Marker rings:** 480 → 256 triangles each.
+- **Shadows:** parts under ~14 cm (eyes, buttons, antenna tips) no longer draw into the shadow map.
+
+**New living details** (`src/life.js`, recipes in `src/life-data.js`)
+
+| Destination | Life |
+|---|---|
+| City | pigeon flocks, butterflies, warm dawn dust, swaying trees |
+| Countryside | swallows, butterflies, rising dandelion seeds, swaying crops and grass |
+| Beach, platform, atolls, island | gulls (plus butterflies by the island palms) |
+| Reef | clownfish, tangs and butterflyfish schools; rising bubbles; kelp and seagrass in the current |
+| Wreck | a 56-fish sardine school, slow groupers, bubbles |
+| Abyss | glowing lanternfish, pulsing jellyfish, bioluminescent plankton |
+| Storm sky | rain |
+| High sky | two V-formations of geese, wind motes |
+| Moon | low regolith dust |
+| Home festival | white doves, butterflies, fireflies, falling festival petals |
+| Expedition pools | small fish just under each pool's surface, tinted toward the water (2.5D layering, no transparent pass) |
+
+How it stays light:
+
+- Each kind of creature is one `InstancedMesh` of a 10–66-triangle procedural mesh.
+- Its swim, flap, flutter or pulse runs in the vertex shader. The phase is accumulated, so a calm-to-flee change never jumps.
+- The CPU only steers:
+  - capped turn rate, banking, leader-follow schools;
+  - creatures dart away from KAI and part around the camera's line to KAI, so the hero is never hidden;
+  - it allocates nothing and sleeps while a swarm is off screen.
+- Motes are GPU-only points: one uniform per frame.
+- Plant sway patches the scenery's own foliage material, so it adds no draw call. Bend depends on height above the terrain, read from an 81×81 height texture, so grass flexes and trunks barely move.
+- A seeded RNG drives cosmetics, so gameplay randomness never shifts.
+- Counts scale by tier (low 45%, medium 70%, high 100%). Portrait phones draw creatures 1.35× larger to keep them at 20–27 px.
+- Reduced motion stills plants, hides motes and calms creatures.
+
+**Before → after the whole pass.** SwiftShader as a weak-GPU proxy at 390×844, with the old and new builds alternated in the same session (two runs each):
+
+| Stage, tier | Before (fps) | After (fps) | Triangles |
+|---|---|---|---|
+| Beach, low | 8.6 / 8.2 | **16.2 / 18.4** | 74k → 52k |
+| Reef, low | 8.4 / 11.6 | **21.2 / 19.7** | 81k → 69k |
+| Beach Brawl, medium | 3.4 / 3.4 | **3.8 / 4.0** | 121k → 47k |
+| Beach, medium | 4.5 / 3.9 | 4.8 / 3.4 (noise) | 141k → 95k |
+
+On this proxy, medium is bound by post-processing. A phone that cannot hold medium now steps down automatically to a low tier that is about twice as fast as before.
+
+**Measured cost of the life:**
+
+- Life adds 1–5 draw calls and about 1.5k triangles per destination.
+- On SwiftShader, fps with and without life are within noise (4.8 vs 4.5; 4.8 vs 4.7; 3.5 vs 3.5).
+- The life update costs 0.07–0.4 ms per frame with the CPU slowed 4×.
+- Geometry, texture and shader-program counts are identical after four cycles through six destinations (236 / 34 / 50).
+- Foliage sway visibly moves the reef's kelp, and stops entirely under reduced motion.
+
+**Next step, not done:** merge each robot's parts into one draw call per pivot, with per-vertex colour, metalness, roughness and emissive. That would cut the remaining actor draw calls by about 4×. It needs the paint system, hit flashes, defeat tints and x-ray silhouettes reworked to per-vertex data, so it is left as a follow-up.
+
 ## 6. Remaining gates to AAA
 
 1. **Character performance:** skeletal rigs with authored animation (anticipation, recoil, carry, repair, idle variety) instead of rigid pivots; facial expression for KAI and BOLT.

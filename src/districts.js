@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { ENVIRONMENTS } from "./journey-data.js";
 import { createEarth } from "./planet.js";
+import { LIFE } from "./life-data.js";
 
 export function buildDistrict(world, item) {
   const environment = ENVIRONMENTS[item.stage.scene];
@@ -20,6 +21,7 @@ export function buildDistrict(world, item) {
     // Emitters, water and clouds neither cast nor catch hard shadows; soft volumes would show facets.
     if (/^Journey (Glow|Water|Cloud)/.test(name)) child.castShadow = child.receiveShadow = false;
   });
+  world.setLife?.(LIFE[environment.key], scenery);
   if (["underwater","space","moon"].includes(environment.kind)) {
     const count = environment.kind === "underwater" ? 100 : 200, positions = [];
     for (let i=0;i<count;i++) {

@@ -74,6 +74,8 @@ ui = new UI(progress, {
     progress.settings = { ...progress.settings, ...patch };
     game.progress = progress;
     world.settings = progress.settings;
+    // Choosing "Auto" again re-measures this device from the top.
+    if (patch.quality === "auto") world.governor.reset();
     if (patch.quality) world.setQuality(patch.quality);
     sound.enabled = progress.settings.sound !== false;
     // Turning sound on is a user gesture: start the audio context now instead of waiting for a relaunch.
@@ -104,8 +106,9 @@ try {
 
 let lastTime = performance.now();
 function frame(now) {
-  const dt = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
+  const raw = Math.max(0, (now - lastTime) / 1000), dt = Math.min(0.05, raw);
   lastTime = now;
+  world.adaptQuality(raw, game.running && !game.paused);
   game.update(dt);
   world.update(dt, game.running ? game.player : null, progress.settings.reducedMotion);
   requestAnimationFrame(frame);
