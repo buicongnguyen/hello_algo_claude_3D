@@ -149,3 +149,48 @@ test("only the low tier drops image-based lighting", () => {
   assert.equal(QUALITY_PROFILES.high.ibl, true);
   assert.equal(typeof mulberry32(1)(), "number");
 });
+
+test("ground birds peck, burst into flight when KAI comes close, land again and walk around props", async () => {
+  const { turtleGeometry } = await import("../src/life.js");
+  assert.ok(tris(turtleGeometry()) <= 40);
+  const obstacles = [{ x: 0, z: 0, radius: 1.2 }];
+  const walkers = new Swarm({ geometry: birdGeometry(), area: { x: 0, z: 0, rx: 5, rz: 5, y0: .45, y1: 4 }, count: 8, schools: 8, seed: 3, grounded: true, walk: .35, speed: [1.6, 2.4], scare: 3, obstacles });
+  assert.ok([...walkers.y].every(y => Math.abs(y - .45) < 1e-6), "they start on the ground");
+  for (let t = 0; t < 6; t += 1 / 60) {
+    walkers.update(1 / 60, {});
+    for (let i = 0; i < walkers.count; i++) if (walkers.y[i] <= .5) assert.ok(Math.hypot(walkers.x[i], walkers.z[i]) >= 1.2 + .29, "never walks into a prop");
+  }
+  const i = 0;
+  walkers.update(1 / 60, { threat: { x: walkers.x[i] + .5, y: 1, z: walkers.z[i] } });
+  let highest = 0;
+  for (let t = 0; t < 2; t += 1 / 60) { walkers.update(1 / 60, {}); highest = Math.max(highest, walkers.y[i]); }
+  assert.ok(highest > 1.2, `takes off (${highest.toFixed(2)} m)`);
+  for (let t = 0; t < 12; t += 1 / 60) walkers.update(1 / 60, {});
+  assert.ok(walkers.y[i] <= .5, "and lands again");
+});
+
+test("baking merges each moving part into one mesh, keeping paint, named and see-through parts", async () => {
+  const { bakeModel } = await import("../src/bake.js");
+  const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: .5, ...extra });
+  const root = new THREE.Group(), arm = new THREE.Group(); arm.name = "ShoulderPivot_L"; root.add(arm);
+  const box = () => new THREE.BoxGeometry(.2, .2, .2);
+  root.add(new THREE.Mesh(box(), std(0xff0000)), new THREE.Mesh(box(), std(0x00ff00, { metalness: 1, roughness: .2 })),
+    new THREE.Mesh(box(), std(0x0000ff, { emissive: 0x00ffff, emissiveIntensity: 1.5 })), new THREE.Mesh(box(), std(0xffffff, { name: "Ceramic White" })),
+    new THREE.Mesh(box(), std(0x123456, { transparent: true, opacity: .5 })));
+  const torso = new THREE.Mesh(box(), std(0x999999)); torso.name = "Torso"; root.add(torso);
+  arm.add(new THREE.Mesh(box(), std(0x111111)), new THREE.Mesh(box(), std(0x222222)));
+  const painted = bakeModel(root.clone(true), { paintable: true });
+  assert.deepEqual(painted, { before: 8, after: 5 }, "root: 3 merge into 1 (+ paint, glass, Torso kept); arm: 2 into 1");
+  const plain = bakeModel(root, { paintable: false });
+  assert.equal(plain.after, 4, "without the paint system, Ceramic White merges too");
+  const merged = root.children.find(c => c.name.startsWith("baked_"));
+  assert.ok(merged.material.vertexColors && merged.geometry.attributes.aPbr && merged.geometry.attributes.aGlow);
+  assert.ok(arm.children.length === 1 && arm.children[0].name === "baked_ShoulderPivot_L_0", "merging never crosses a pivot");
+  // Name lookups for animated pivots must not match the merged meshes inside them.
+  const pivots = []; root.traverse(o => { if (/^(Hip|ShoulderPivot)_|^TailPivot|^Rotor|^Exhaust_|^Tentacle_/.test(o.name)) pivots.push(o.name); });
+  assert.deepEqual(pivots, ["ShoulderPivot_L"]);
+  // The shader hooks the bake relies on exist in this three.js.
+  for (const chunk of ["#include <roughnessmap_fragment>", "#include <metalnessmap_fragment>", "#include <normal_fragment_maps>", "#include <lights_physical_fragment>", "#include <emissivemap_fragment>"]) assert.ok(THREE.ShaderLib.physical.fragmentShader.includes(chunk), chunk);
+  assert.ok(THREE.ShaderChunk.normal_fragment_maps.includes("mapN.xy *= normalScale;"));
+  assert.ok(THREE.ShaderChunk.lights_physical_fragment.includes("material.clearcoat = clearcoat;"));
+});

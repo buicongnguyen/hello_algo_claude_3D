@@ -14,6 +14,7 @@ import { Boundary } from "./boundary.js";
 import { Life } from "./life.js";
 import { LIFE_BUDGET, islandLife } from "./life-data.js";
 import { loadGovernor, saveGovernor } from "./governor.js";
+import { bakeModel } from "./bake.js";
 
 const MODEL_NAMES = ["kai", "bolt", "rust_scout", "zombie_dog", "rust_drone", "lighthouse", "energy_cell", "turret", "rocket", "crab", "beacon", "palm", "octopus", "starfish", "snail", "clam", "coral_cluster", "reef_arch", "salvage_tower", "moon_mushroom", "software_disc", "prism_armor", "twin_thrusters", "halo_antenna", "starship"];
 
@@ -117,10 +118,15 @@ export class World {
     const journey = { sand: metric(this.surfaces.sand), wood: metric(this.surfaces.wood), water: metric(this.surfaces.water) };
     this.journeyWater = journey.water.normalMap;
     this.draco.dispose();
+    const materialsOf = child => child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : [];
+    for (const model of this.models.values()) model.traverse(child => { for (const material of materialsOf(child)) finishMaterial(material, this.surfaces); });
+    // Bake colours once per cached model (finishes first: they decide which parts may share a draw).
+    this.bakeStats = {};
+    const paintable = new Set(["kai", "prism_armor", "twin_thrusters", "halo_antenna"]);
+    for (const [name, model] of this.models) if (!name.startsWith("journey_")) this.bakeStats[name] = bakeModel(model, { paintable: paintable.has(name) });
     for (const model of this.models.values()) model.traverse(child => {
       if (child.geometry) this.assetResources.add(child.geometry);
-      for (const material of child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : []) {
-        finishMaterial(material, this.surfaces);
+      for (const material of materialsOf(child)) {
         if (material.name.startsWith("Journey Water")) { material.normalMap = journey.water.normalMap; material.normalScale = new THREE.Vector2(.45, .45); }
         if (/^Journey (Ground|Stone)/.test(material.name)) {
           material.map = journey.sand.map; material.normalMap = journey.sand.normalMap; material.normalScale.setScalar(.35);
@@ -422,7 +428,8 @@ export class World {
       // each for a shadow nobody can see; only parts larger than ~14 cm cast.
       const geometry = child.geometry;
       if (!geometry.boundingSphere) geometry.computeBoundingSphere();
-      child.castShadow = name.startsWith("journey_") || geometry.boundingSphere.radius * child.getWorldScale(this.shadowScale ??= new THREE.Vector3()).x >= .14;
+      child.userData.casts = name.startsWith("journey_") || geometry.boundingSphere.radius * child.getWorldScale(this.shadowScale ??= new THREE.Vector3()).x >= .14;
+      child.castShadow = child.userData.casts;
       child.receiveShadow = true;
     });
     object.userData.limbs = [];
@@ -625,9 +632,36 @@ export class World {
         this.sun.shadow.map = null;
       }
     }
-    this.pipeline.configure(this.quality);
+    const densePhone = devicePixelRatio >= 2 && typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+    this.pipeline.configure(this.quality, { antialias: !densePhone });
     this.life?.setBudget(LIFE_BUDGET[this.quality]);
     this.resize();
+  }
+
+  // Compile every shader the game will need while the title screen shows, and keep the
+  // short-lived effect materials (warning lines, sparks, labels) alive, so no fight or
+  // telegraph compiles a program mid-play: a release + recompile was a 40–90 ms hitch.
+  async warmUp() {
+    const group = new THREE.Group();
+    group.name = "Shader warm-up";
+    for (const [name, model] of this.models) if (!name.startsWith("journey_")) group.add(model.clone(true));
+    const line = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, 1)]);
+    this.warmMaterials = [
+      new THREE.LineDashedMaterial({ dashSize: .45, gapSize: .28, transparent: true, opacity: .68 }), new THREE.LineBasicMaterial(),
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: .35, wireframe: true }), new THREE.MeshBasicMaterial({ transparent: true, opacity: .82 }),
+      new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: false }), new THREE.MeshStandardMaterial({ emissive: 0xffffff, emissiveIntensity: .5, roughness: .3 }),
+      new THREE.SpriteMaterial({ depthTest: false }), new THREE.SpriteMaterial({ map: this.surfaces.sand.map, depthTest: false }),
+    ];
+    for (const material of this.warmMaterials) {
+      const object = material.isSpriteMaterial ? new THREE.Sprite(material) : material.isLineBasicMaterial ? new THREE.Line(line, material) : new THREE.Mesh(this.pulseGeometry, material);
+      if (material.isLineDashedMaterial) object.computeLineDistances();
+      group.add(object);
+    }
+    group.position.set(0, -500, 0);
+    this.scene.add(group);
+    try { await (this.renderer.compileAsync ? this.renderer.compileAsync(group, this.camera, this.scene) : this.renderer.compile(group, this.camera, this.scene)); }
+    catch { /* warm-up is an optimisation only */ }
+    finally { group.removeFromParent(); }
   }
 
   // "Auto" lowers resolution, then the tier, on a device that cannot hold the frame rate.
@@ -643,7 +677,7 @@ export class World {
     this.life?.dispose();
     this.life = null;
     if (!recipe || !(recipe.swarms?.length || recipe.motes?.length || recipe.sway)) return;
-    this.life = new Life(this.scene, recipe, { scenery, budget: LIFE_BUDGET[this.quality] ?? LIFE_BUDGET.medium, sizeScale: this.camera.aspect < 1 ? 1.35 : 1 });
+    this.life = new Life(this.scene, recipe, { scenery, budget: LIFE_BUDGET[this.quality] ?? LIFE_BUDGET.medium, sizeScale: this.camera.aspect < 1 ? 1.35 : 1, obstacles: this.obstacles });
   }
 
   resize() {

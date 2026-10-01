@@ -97,8 +97,12 @@ export class RenderPipeline {
     renderer.shadowMap.autoUpdate = false;
   }
 
-  configure(level) {
+  // antialias: false skips MSAA. On dense phone screens (device pixel ratio ≥ 2) a stair-step is
+  // about two physical pixels wide, while MSAA was the largest cost of the phone tier
+  // (SwiftShader at 390×844: +40–78% fps without it).
+  configure(level, { antialias = true } = {}) {
     this.level = level;
+    this.antialias = antialias;
     this.profile = QUALITY_PROFILES[level] || QUALITY_PROFILES.low;
     this.disposeComposer();
     const extensions = this.renderer.extensions;
@@ -108,7 +112,7 @@ export class RenderPipeline {
     const size = this.renderer.getSize(new THREE.Vector2());
     const target = new THREE.WebGLRenderTarget(Math.max(1, size.x), Math.max(1, size.y), { type: THREE.HalfFloatType });
     const composer = new EffectComposer(this.renderer, target);
-    composer.addPass(new SceneMSAAPass(this.scene, this.camera, this.profile.samples, () => this.recordScene()));
+    composer.addPass(new SceneMSAAPass(this.scene, this.camera, antialias ? this.profile.samples : 0, () => this.recordScene()));
     if (this.profile.ao) {
       const ao = new GTAOPass(this.scene, this.camera, Math.max(1, size.x >> 1), Math.max(1, size.y >> 1));
       ao.updateGtaoMaterial({ radius: .55, distanceExponent: 1.4, thickness: 1.2, scale: 1.15, samples: 12 });

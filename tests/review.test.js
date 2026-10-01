@@ -453,3 +453,18 @@ test("pointer presses that belong to the tap which started play are ignored", ()
     if (originalDocument === undefined) delete globalThis.document; else globalThis.document = originalDocument;
   }
 });
+
+test("movers cast shadows only near KAI, and tiny parts never do", () => {
+  const { game } = harness(); game.begin(BRAWL);
+  const enemy = game.spawnEnemy(false, 0);
+  enemy.object.traverse(o => { if (o.isMesh) { o.userData.casts = true; o.castShadow = true; } });
+  const tiny = new THREE.Mesh(new THREE.BoxGeometry(.01, .01, .01), new THREE.MeshBasicMaterial()); tiny.userData.casts = false; enemy.object.add(tiny);
+  const parts = []; enemy.object.traverse(o => { if (o.isMesh && o !== tiny) parts.push(o); });
+  Object.assign(enemy, { x: game.player.x + 20, z: game.player.z });
+  game.updateShadowCasters(1);
+  assert.equal(parts.some(o => o.castShadow), false, "far away: no shadow-pass draws");
+  Object.assign(enemy, { x: game.player.x + 3, z: game.player.z });
+  game.updateShadowCasters(1);
+  assert.equal(tiny.castShadow, false, "tiny parts stay off");
+  assert.ok(parts.every(o => o.castShadow), "near: casts again");
+});

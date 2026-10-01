@@ -327,6 +327,21 @@ export class Game {
     return enemy;
   }
 
+  // Movers cast shadows only near the camera's focus (smooth-dense-scenes): a robot 16 m away
+  // costs a shadow-pass draw per part for a shadow that is off screen or a few pixels wide.
+  updateShadowCasters(dt) {
+    this.shadowTimer = (this.shadowTimer ?? 0) - dt;
+    if (this.shadowTimer > 0 || !this.player) return;
+    this.shadowTimer = .25;
+    for (const entity of this.entities) {
+      if (!entity.object) continue;
+      const near = entity.active !== false && distance(entity, this.player) < 16;
+      if (entity.object.userData.castsShadow === near) continue;
+      entity.object.userData.castsShadow = near;
+      entity.object.traverse(child => { if (child.isMesh && !child.userData.silhouette) child.castShadow = near && child.userData.casts !== false; });
+    }
+  }
+
   cloneMaterials(object) {
     object.traverse(child => { if (child.isMesh) child.material = child.material.clone(); });
   }
@@ -385,6 +400,7 @@ export class Game {
     if (this.input.consume("pause")) return this.pause();
     // A few frames of hit-stop sell impacts; the world keeps animating around the frozen moment.
     if (this.hitStop > 0) { this.hitStop = Math.max(0, this.hitStop - dt); return; }
+    this.updateShadowCasters(dt);
     this.aimTime = Math.max(0, this.aimTime - dt);
     if (this.stage.type === "roam") {
       this.elapsed += dt;

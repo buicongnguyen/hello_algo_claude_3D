@@ -266,7 +266,66 @@ On this proxy, medium is bound by post-processing. A phone that cannot hold medi
 - Geometry, texture and shader-program counts are identical after four cycles through six destinations (236 / 34 / 50).
 - Foliage sway visibly moves the reef's kelp, and stops entirely under reduced motion.
 
-**Next step, not done:** merge each robot's parts into one draw call per pivot, with per-vertex colour, metalness, roughness and emissive. That would cut the remaining actor draw calls by about 4×. It needs the paint system, hit flashes, defeat tints and x-ray silhouettes reworked to per-vertex data, so it is left as a follow-up.
+## 5d. Phone pass — fewer draws, no hitches, more life
+
+This pass applies the `smooth-dense-scenes` approach: measure real WebGL draws (shadow and post passes included) on a 390×844 phone view with the CPU slowed 4×, find the real cost, fix it, and measure again.
+
+**What the profile showed:**
+
+- Most of the main-thread time was three.js's per-draw overhead: uniform uploads, buffer binds and matrix uploads.
+- Combat stuttered: 20 frames over 50 ms in 2.5 s on the beach. The enemy pounce warning line created and disposed its own dashed-line material, so every telegraph recompiled that shader.
+- In the phone tier's post chain, 4× MSAA was the largest per-pixel cost (+40–78% fps without it on SwiftShader). Bloom and grading cost little.
+
+**Fixes:**
+
+- **Bake per moving part** (`src/bake.js`). Each pivot's meshes merge into one, with colour, roughness, metalness, normal-map strength, clearcoat and glow stored per vertex. A patched standard/physical material reads them.
+  - What stays separate: the paint system's recolourable materials (KAI and its gear only), see-through parts, and nodes the code finds by name.
+  - Merged meshes are named `baked_*`, so pivot lookups (`Hip_`, `ShoulderPivot_`, `Rotor`, …) never animate them twice.
+  - Mesh counts: Rust Scout 22 → 5, zombie dog 18 → 6, drone 14 → 9, octopus 21 → 10, starship 10 → 5, palm 4 → 1, KAI 22 → 15.
+  - A frozen line-up of every model renders the same before and after: 48 of 840,000 pixels differ, against 27 between two captures of the same build.
+- **Nearby-only shadows:** movers cast shadows within 16 m of KAI, and parts under ~14 cm never cast.
+- **Shader warm-up:** while the title screen shows, every model and every short-lived effect material is compiled in the background, and the effect materials are kept alive. Neither a first fight nor a repeated telegraph compiles mid-play.
+- **No MSAA on dense touch screens** (pixel ratio ≥ 2). A stair-step is about two physical pixels there. Bloom, grading and shadows stay.
+
+**Measured** (real draws including shadow and post passes, phone view, medium tier, CPU ÷4):
+
+| Stage | Draws before → after | Shadow casters |
+|---|---|---|
+| Beach combat | 279 → 148 | 153 → 61 |
+| Beach Brawl | 182 → 116 | 63 → 29 |
+| Reef | 200 → 134 | 117 → 48 |
+| Home festival | 160 → 116 | 94 → 42 |
+| Expedition | 256 → 148 | 149 → 59 |
+| City | 160 → 106 | 100 → 43 |
+
+Every stage is now within the comfortable phone budget of 200 draws.
+
+Old and new builds alternated three times each:
+
+| Stage | Build | Median frame (ms) | 95th percentile (ms) | Frames over 50 ms |
+|---|---|---|---|---|
+| Expedition | old | 10.1 | 29.3 | 6 in total |
+| Expedition | new | 10.8 | 20.9 | 0 |
+| Beach combat | old | 16.4 | 31.7 | — |
+| Beach combat | new | 12.3 | 31.2 | — |
+
+GPU memory stays flat across stage cycles: 155 geometries (previously 236, because baked parts share less), 34 textures and 68 programs.
+
+**More living details, by scenario:**
+
+| Scenario | Added |
+|---|---|
+| City plaza, countryside, beach, home island, festival plaza | birds that walk and peck: pigeons, sparrows, sandpipers, doves. They burst into flight when KAI comes within ~3.4 m, then land again, and walk around props using the journey collision footprints. |
+| Reef and wreck | sea turtles and manta rays |
+| Beach, platform, atolls, island | glints on the sea |
+| Countryside | buzzing bees |
+| Festival | rising sky lanterns |
+| Ocean platform | flying fish skimming the swell |
+| Orbit | twinkling station sparkles |
+
+These are the same one-draw-call kinds as before. Wings fold while a bird walks, and the head nods while it pecks.
+
+**Next step, not done:** KAI keeps its paint-recolourable parts separate (22 → 15 meshes). Moving the paint system to per-vertex tint would bring KAI to about 6.
 
 ## 6. Remaining gates to AAA
 

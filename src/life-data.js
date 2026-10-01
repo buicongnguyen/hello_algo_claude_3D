@@ -27,6 +27,18 @@ const doves = (area, seed = 51) => ({ name: "doves", shape: "bird", shapeOptions
 const butterflies = (area, count = 10, seed = 61) => ({ name: "butterflies", shape: "butterfly", motion: "flutter", count, schools: count, area, seed,
   length: .55, lengthJitter: .15, speed: [.6, 1.1], fleeSpeed: 2.4, turnRate: 3.5, maxPitch: .6, climbRate: 3, beat: 6, beatPerSpeed: 1, amplitude: .85, fleeAmplitude: .95, scare: 1.8,
   colors: [[0xffb347, 0xff6a3d], [0x9fd8ff, 0x3f6fd6], [0xfff1a0, 0xffc93a], [0xffc1e3, 0xd65aa8]] });
+// Birds that walk and peck on the ground and burst into flight when KAI comes close.
+const walkers = (name, area, count, colors, seed, length = .75) => ({ name, shape: "bird", shapeOptions: { span: .9 }, motion: "flap", count, schools: count, area, seed,
+  grounded: true, walk: .35, length, lengthJitter: .12, speed: [1.6, 2.4], fleeSpeed: 4.2, turnRate: 3, bank: 1, maxPitch: .6, climbRate: 3,
+  beat: 3, beatPerSpeed: .4, amplitude: .5, fleeAmplitude: .85, glide: .4, scare: 3.4, colors });
+const turtles = (area, seed = 75) => ({ name: "sea turtles", shape: "turtle", motion: "flap", count: 3, schools: 3, area, seed,
+  length: 1.1, lengthJitter: .12, speed: [.35, .55], fleeSpeed: 1.2, turnRate: .5, maxPitch: .12, beat: .45, beatPerSpeed: .1, amplitude: .55, fleeAmplitude: .7, scare: 2.6,
+  colors: [[0x6b8a3a, 0xc9b27a], [0x7a6a3a, 0xd8c08a]] });
+const mantas = (area, seed = 77) => ({ name: "manta rays", shape: "bird", shapeOptions: { span: 2.1, body: .6 }, motion: "flap", count: 2, schools: 2, area, seed,
+  length: 1.6, lengthJitter: .1, speed: [.6, .9], fleeSpeed: 1.6, turnRate: .4, bank: .8, maxPitch: .1, beat: .35, beatPerSpeed: .05, amplitude: .38, fleeAmplitude: .5, scare: 3,
+  colors: [[0x2c3e5c, 0x5a7090]] });
+const glints = (box, seed, count = 80) => ({ name: "sea glints", count, box, size: .16, speed: .05, wobble: .4, colors: [0xffffff, 0xfff1c4], opacity: .85, additive: true, seed });
+
 const reefFish = (area, seed = 71) => [
   { name: "clownfish", shape: "fish", motion: "swim", count: 18, schools: 4, area, seed, length: .7, speed: [.6, 1.1], colors: [[0xff7a1a, 0xffffff]] },
   { name: "tangs", shape: "fish", shapeOptions: { deep: 1.7, saddle: false }, motion: "swim", count: 16, schools: 2, area, seed: seed + 1, length: .9, speed: [.7, 1.2], colors: [[0x2f6fe0, 0xffd23a]] },
@@ -39,21 +51,25 @@ const CURRENT_SWAY = { angle: .22, stiffness: 4, frequency: .22, flutter: .01 };
 
 export const LIFE = {
   city: {
-    swarms: [pigeons(AREA(0, -12, 30, 20, 5, 10)), butterflies(AREA(-6, -2, 12, 10, .7, 2.4), 10)],
+    swarms: [pigeons(AREA(0, -12, 30, 20, 5, 10)), butterflies(AREA(-6, -2, 12, 10, .7, 2.4), 10),
+      walkers("plaza pigeons", AREA(-11, -8, 5.5, 4.5, .45, 4.5), 10, [[0x8d96a0, 0xd8dee4], [0x6f7780, 0xb8c0c8]], 12, .8)],
     motes: [{ name: "dawn dust", count: 60, box: AREA(0, -4, 24, 20, .6, 6), size: .12, speed: .2, wobble: .5, colors: [0xffe2b0], opacity: .5, additive: true, seed: 91 }],
     sway: LAND_SWAY,
   },
   country: {
-    swarms: [swallows(AREA(0, -6, 30, 24, 2.5, 7)), butterflies(AREA(0, -4, 24, 18, .6, 2.6), 16, 62)],
-    motes: [{ name: "dandelion seeds", kind: "rise", count: 70, box: AREA(0, -6, 26, 22, .4, 7), size: .14, speed: .18, wobble: .7, colors: [0xffffff, 0xfff6d8], opacity: .7, seed: 92 }],
+    swarms: [swallows(AREA(0, -6, 30, 24, 2.5, 7)), butterflies(AREA(0, -4, 24, 18, .6, 2.6), 16, 62),
+      walkers("sparrows", AREA(-6, 4, 9, 6, .45, 3.5), 8, [[0x8a6a48, 0xd8c2a0], [0x6f5a40, 0xc9b08a]], 32, .62)],
+    motes: [{ name: "bees", count: 40, box: AREA(0, -4, 20, 16, .5, 1.6), size: .09, speed: .2, wobble: .25, rate: 6, colors: [0xffd23a, 0xffe680], opacity: .95, seed: 93 },
+      { name: "dandelion seeds", kind: "rise", count: 70, box: AREA(0, -6, 26, 22, .4, 7), size: .14, speed: .18, wobble: .7, colors: [0xffffff, 0xfff6d8], opacity: .7, seed: 92 }],
     sway: LAND_SWAY,
   },
   beach: {
-    swarms: [gulls(AREA(0, -24, 36, 18, 4.5, 10))],
+    swarms: [gulls(AREA(0, -24, 36, 18, 4.5, 10)), walkers("sandpipers", AREA(0, -15, 16, 2.4, .45, 3), 8, [[0xa8957a, 0xf4efe6]], 22, .58)],
+    motes: [glints(AREA(0, -40, 40, 16, .12, .3), 23)],
     sway: LAND_SWAY,
   },
   reef: {
-    swarms: reefFish(AREA(0, -2, 24, 22, 1.2, 5)),
+    swarms: [...reefFish(AREA(0, -2, 24, 22, 1.2, 5)), turtles(AREA(0, -6, 22, 18, 2.5, 5.5)), mantas(AREA(0, -10, 24, 14, 3.5, 6.5))],
     motes: [bubbles(AREA(0, -4, 20, 18, .5, 14))],
     sway: CURRENT_SWAY,
   },
@@ -63,6 +79,7 @@ export const LIFE = {
         length: .5, lengthJitter: .1, speed: [1.6, 2.2], fleeSpeed: 4.5, turnRate: 2.2, beat: 1.6, colors: [[0xc3d1de, 0x5d7f9e]] },
       { name: "groupers", shape: "fish", shapeOptions: { deep: 1.3 }, motion: "swim", count: 4, schools: 4, area: AREA(0, 0, 18, 16, 1, 3), seed: 102,
         length: 1.2, speed: [.35, .6], turnRate: 1.2, beat: 1.2, amplitude: .07, colors: [[0x7a5a3a, 0xc9a46a]] },
+      mantas(AREA(0, -8, 22, 14, 3, 6.5), 103),
     ],
     motes: [bubbles(AREA(0, -8, 18, 14, .5, 12), 30, 82)],
     sway: CURRENT_SWAY,
@@ -79,10 +96,15 @@ export const LIFE = {
     sway: { ...CURRENT_SWAY, angle: .12 },
   },
   platform: {
-    swarms: [gulls(AREA(-4, -20, 30, 18, 4, 9), 10, 121)],
+    swarms: [gulls(AREA(-4, -20, 30, 18, 4, 9), 10, 121),
+      // Flying fish skim the swell in long, straight glides.
+      { name: "flying fish", shape: "fish", shapeOptions: { slim: .8 }, motion: "swim", count: 10, schools: 3, area: AREA(0, -30, 34, 12, .3, 1.3), seed: 122,
+        length: .8, speed: [4.5, 6.5], fleeSpeed: 7, turnRate: .7, maxPitch: .25, beat: 2, amplitude: .05, colors: [[0x3f7fd6, 0xd8ecff]] }],
+    motes: [glints(AREA(0, -30, 40, 18, .05, .2), 123)],
   },
   atolls: {
     swarms: [gulls(AREA(0, -22, 36, 18, 4.5, 10), 10, 131)],
+    motes: [glints(AREA(0, -30, 40, 16, .25, .4), 132)],
     sway: LAND_SWAY,
   },
   stormsky: {
@@ -92,21 +114,26 @@ export const LIFE = {
     swarms: [geese(AREA(-4, -16, 32, 16, 5, 9))],
     motes: [{ name: "wind motes", count: 50, box: AREA(0, -6, 24, 20, .5, 8), size: .09, speed: .3, wobble: 1.4, colors: [0xffffff], opacity: .45, seed: 151 }],
   },
-  orbit: {},
+  orbit: { motes: [{ name: "station sparkles", count: 50, box: AREA(0, -2, 22, 22, .5, 8), size: .12, speed: .05, wobble: .2, colors: [0xbfe8ff, 0xffffff], opacity: .8, additive: true, seed: 152 }] },
   moonplain: { motes: [{ name: "regolith dust", count: 60, box: AREA(0, -2, 20, 18, .2, 1.4), size: .1, speed: .08, wobble: .5, colors: [0xd8d4cc], opacity: .45, seed: 161 }] },
   crater: { motes: [{ name: "regolith dust", count: 60, box: AREA(0, -2, 20, 18, .2, 1.4), size: .1, speed: .08, wobble: .5, colors: [0xd8d4cc], opacity: .45, seed: 162 }] },
   observatory: { motes: [{ name: "regolith dust", count: 50, box: AREA(0, -2, 20, 18, .2, 1.4), size: .1, speed: .08, wobble: .5, colors: [0xd8d4cc], opacity: .45, seed: 163 }] },
   home: {
-    swarms: [doves(AREA(0, -14, 30, 18, 5, 10)), butterflies(AREA(0, 2, 14, 12, .7, 2.4), 6, 171)],
+    swarms: [doves(AREA(0, -14, 30, 18, 5, 10)), butterflies(AREA(0, 2, 14, 12, .7, 2.4), 6, 171),
+      walkers("plaza doves", AREA(0, 5, 5, 4, .45, 4), 8, [[0xfbf8ff, 0xd9e4ff]], 174, .85)],
     motes: [
       { name: "fireflies", count: 90, box: AREA(0, -4, 22, 20, .5, 4), size: .55, speed: .25, wobble: .6, colors: [0xfff09a, 0xc8ff8a], opacity: .9, additive: true, seed: 172 },
+      // Sky lanterns drift up over the museum, a few warm glows at a time.
+      { name: "sky lanterns", kind: "rise", count: 40, box: AREA(0, -10, 24, 14, 2, 18), size: .9, speed: .35, wobble: .6, colors: [0xffb35c, 0xff8a4a, 0xffd27a], opacity: .9, additive: true, seed: 175 },
       { name: "festival petals", kind: "fall", count: 110, box: AREA(0, -2, 16, 16, .4, 9), size: .3, speed: .5, wobble: .5, colors: [0xff8fc4, 0xffd166, 0x8fe3ff, 0xffffff], opacity: .85, seed: 173 },
     ],
     sway: LAND_SWAY,
   },
   // The home island (Beach Brawl, expeditions, free roam): gulls over the sea, butterflies by the palms.
   island: {
-    swarms: [gulls(AREA(0, -20, 34, 16, 4.5, 9), 10, 181), butterflies(AREA(0, -2, 16, 12, .6, 2.4), 8, 182)],
+    swarms: [gulls(AREA(0, -20, 34, 16, 4.5, 9), 10, 181), butterflies(AREA(0, -2, 16, 12, .6, 2.4), 8, 182),
+      walkers("sandpipers", AREA(0, -21.8, 9, 1.4, .5, 3), 6, [[0xa8957a, 0xf4efe6]], 183, .58)],
+    motes: [glints(AREA(0, -36, 36, 10, -.45, -.25), 184, 60)],
   },
 };
 

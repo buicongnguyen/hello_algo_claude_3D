@@ -96,6 +96,7 @@ game = new Game(world, input, ui, progress, next => {
 try {
   await world.initialize((amount, label) => ui.loading(amount, label));
   world.setCampaign(progress);
+  world.warmUp();
   ui.loading(1, "ready");
   setTimeout(() => ui.showTitle(), 280);
   if (world.failedModels.length) ui.message(`${world.failedModels.length} models could not load. Refresh to retry; the game remains playable.`, true);

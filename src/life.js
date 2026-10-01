@@ -137,12 +137,32 @@ export function jellyGeometry() {
   return b.done();
 }
 
+// A sea turtle: a low hexagonal shell, a head and four flippers that row (aBend 1 at the
+// flipper tips). Seen from above it reads as a turtle at 20 px. 34 triangles.
+export function turtleGeometry() {
+  const b = builder();
+  const ring = (rx, rz, y) => Array.from({ length: 6 }, (_, i) => { const a = i / 6 * TAU + Math.PI / 6; return [Math.cos(a) * rx, y, Math.sin(a) * rz + .02, 0]; });
+  const top = [0, .16, 0, 0], rim = ring(.3, .4, .02), belly = [0, -.04, 0, 0];
+  for (let i = 0; i < 6; i++) { const j = (i + 1) % 6; b.tri(top, rim[j], rim[i], i % 2, .95 + (i % 2) * .1); b.tri(belly, rim[i], rim[j], 0, 1.15); }
+  const neck = [0, .03, .4, 0], head = [0, .05, .58, .1], cheekL = [-.07, .03, .48, .05], cheekR = [.07, .03, .48, .05];
+  b.tri(neck, cheekR, head, 1, 1); b.tri(neck, head, cheekL, 1, 1); b.tri(neck, cheekL, head, 1, .8); b.tri(neck, head, cheekR, 1, .8);
+  for (const side of [1, -1]) {
+    const f0 = [.24 * side, 0, .2, .05], f1 = [.22 * side, 0, .05, .05], tip = [.62 * side, -.02, .02, 1];
+    const r0 = [.2 * side, 0, -.22, .05], r1 = [.12 * side, 0, -.3, .05], rtip = [.34 * side, -.02, -.38, .7];
+    const front = side > 0 ? [f0, tip, f1] : [f0, f1, tip], rear = side > 0 ? [r0, rtip, r1] : [r0, r1, rtip];
+    b.tri(...front, 1, 1); b.tri(front[0], front[2], front[1], 1, .85);
+    b.tri(...rear, 1, 1); b.tri(rear[0], rear[2], rear[1], 1, .85);
+  }
+  return b.done();
+}
+
 // ---- material: a built-in Lambert (so fog, tone mapping and lights stay right) plus motion ----
 const MOTION = {
   // A wave travels from head to tail; the head barely moves, the tail swings most.
   swim: "transformed.x += sin(aMotion.x - aBend * 3.2) * aMotion.y * aBend * aBend;",
   // Wings rotate about the body axis; the outer segment adds a little lag for a soft curve.
-  flap: `{ float side = sign(transformed.x); float ax = abs(transformed.x);
+  flap: `{ float fold = 1. - smoothstep(.04, .25, aMotion.y); if (aBend > .01) transformed.x *= mix(1., .3, fold);
+    float side = sign(transformed.x); float ax = abs(transformed.x);
     float th = (sin(aMotion.x) + .35) * aMotion.y * aBend + sin(aMotion.x - .9) * aMotion.y * .45 * max(aBend - .45, 0.);
     transformed.x = side * ax * cos(th); transformed.y += ax * sin(th); }`,
   // Butterflies hold their wings in a V and clap them quickly.
@@ -190,14 +210,17 @@ export class Swarm {
     speed = [.6, 1.2], fleeSpeed = 3.2, turnRate = 2.4, climbRate = 1.2, maxPitch = .35, bank = 0,
     beat = 1.2, beatPerSpeed = .9, amplitude = .09, fleeAmplitude = .17, glide = 0, scare = 2.6,
     colors = [[0xff8a2a, 0xffffff]], glow = 0, water = null, seed = 1, formation = "school",
+    grounded = false, walk = .25, obstacles = null,
   }) {
+    // grounded: walks and pecks on the ground (y0); startled, it flies up toward y1, then lands again.
+    this.grounded = grounded; this.walk = walk; this.obstacles = grounded ? obstacles : null;
     Object.assign(this, { name, count, area, speed, fleeSpeed, turnRate, climbRate, maxPitch, bank, beat, beatPerSpeed,
       amplitude, fleeAmplitude, glide, scare, time: 0, budget: 1, quiet: false, asleep: false });
     const rng = this.rng = mulberry32(seed);
     const between = (a, b) => a + rng() * (b - a);
     const F = () => new Float32Array(count);
     Object.assign(this, { x: F(), y: F(), z: F(), h: F(), p: F(), r: F(), v: F(), cruise: F(), gx: F(), gy: F(), gz: F(), gt: F(),
-      flee: F(), fh: F(), phase: F(), amp: F(), size: F(), ox: F(), oy: F(), oz: F(), leader: new Int32Array(count) });
+      flee: F(), fh: F(), phase: F(), amp: F(), size: F(), ox: F(), oy: F(), oz: F(), pause: F(), nod: F(), leader: new Int32Array(count) });
     this.motion = new Float32Array(count * 2);
     const body = new Float32Array(count * 3), accent = new Float32Array(count * 3), color = new THREE.Color();
     const group = Math.max(1, Math.ceil(count / Math.max(1, schools)));
@@ -225,7 +248,7 @@ export class Swarm {
       color.set(pair[1]).multiplyScalar(jitter).toArray(accent, i * 3);
       const p = lead === i ? this.randomPoint(.7) : null;
       this.x[i] = p ? p.x : this.x[lead] + this.ox[i];
-      this.y[i] = p ? p.y : this.y[lead] + this.oy[i];
+      this.y[i] = grounded ? area.y0 : p ? p.y : this.y[lead] + this.oy[i];
       this.z[i] = p ? p.z : this.z[lead] + this.oz[i];
       this.gt[i] = 0;
     }
@@ -245,9 +268,16 @@ export class Swarm {
     this.write(count);
   }
 
+  // Walkers pick spawn points and landing spots clear of every prop.
   randomPoint(margin = .85) {
-    const { area, rng } = this, a = rng() * TAU, r = Math.sqrt(rng()) * margin;
-    return { x: area.x + Math.cos(a) * area.rx * r, y: area.y0 + (area.y1 - area.y0) * (.15 + rng() * .7), z: area.z + Math.sin(a) * area.rz * r };
+    const { area, rng } = this;
+    let point = null;
+    for (let tries = 0; tries < 8; tries++) {
+      const a = rng() * TAU, r = Math.sqrt(rng()) * margin;
+      point = { x: area.x + Math.cos(a) * area.rx * r, y: area.y0 + (area.y1 - area.y0) * (.15 + rng() * .7), z: area.z + Math.sin(a) * area.rz * r };
+      if (!this.obstacles?.some(o => Math.hypot(point.x - o.x, point.z - o.z) < o.radius + .4)) break;
+    }
+    return point;
   }
 
   inside(px, pz) { const u = (px - this.area.x) / this.area.rx, v = (pz - this.area.z) / this.area.rz; return u * u + v * v <= 1; }
@@ -256,7 +286,7 @@ export class Swarm {
 
   // Startle creatures near (x, y, z): a dart away, then back to cruising.
   startle(i, awayX, awayZ) {
-    this.flee[i] = .8 + this.rng() * .6;
+    this.flee[i] = this.grounded ? 2 + this.rng() * 1.4 : .8 + this.rng() * .6;
     this.fh[i] = Math.atan2(awayX, awayZ) + (this.rng() - .5) * .6;
   }
 
@@ -289,7 +319,7 @@ export class Swarm {
       let tx, ty, tz, want;
       if (fleeing) {
         this.flee[i] -= dt;
-        tx = x[i] + Math.sin(this.fh[i]) * 4; tz = z[i] + Math.cos(this.fh[i]) * 4; ty = y[i] + .6;
+        tx = x[i] + Math.sin(this.fh[i]) * 4; tz = z[i] + Math.cos(this.fh[i]) * 4; ty = this.grounded ? area.y1 : y[i] + .6;
         want = this.fleeSpeed;
       } else if (lead !== i && this.flee[lead] <= 0 && lead < n) {
         // Follower: its slot behind the leader, in the leader's frame.
@@ -306,6 +336,15 @@ export class Swarm {
         }
         tx = this.gx[i]; ty = this.gy[i]; tz = this.gz[i];
         want = this.cruise[i] * (this.quiet ? .6 : 1);
+        if (this.grounded) {
+          ty = area.y0;
+          if (y[i] <= area.y0 + .05) {
+            // On the ground: short walks between pecking pauses.
+            this.pause[i] -= dt;
+            if (this.pause[i] <= 0 && this.rng() < dt * .6) this.pause[i] = .8 + this.rng() * 2.2;
+            want = this.pause[i] > 0 ? 0 : this.cruise[i] * this.walk;
+          }
+        }
       }
       // Turn the short way at a capped rate (arcs, never snaps); bank into the turn.
       const turn = this.turnRate * (fleeing ? 2 : 1) * dt;
@@ -318,7 +357,19 @@ export class Swarm {
       const cp = Math.cos(p[i]), step = v[i] * dt;
       const nx = x[i] + Math.sin(h[i]) * cp * step, nz = z[i] + Math.cos(h[i]) * cp * step;
       y[i] = Math.max(area.y0, Math.min(area.y1, y[i] + Math.sin(p[i]) * step));
-      if (this.inside(nx, nz)) { x[i] = nx; z[i] = nz; }
+      const onGround = this.grounded && y[i] <= area.y0 + .05;
+      // Walkers step around props (journey collision footprints); fliers pass over them.
+      let blocked = null;
+      if (onGround && this.obstacles) for (const o of this.obstacles) {
+        // Blocked only when the step goes deeper into the footprint, so a bird inside can always leave.
+        const ox = nx - o.x, oz = nz - o.z, d2 = ox * ox + oz * oz;
+        if (d2 < (o.radius + .3) ** 2 && d2 < (x[i] - o.x) ** 2 + (z[i] - o.z) ** 2) { blocked = o; break; }
+      }
+      if (blocked) {
+        const away = angleDelta(h[i], Math.atan2(x[i] - blocked.x, z[i] - blocked.z));
+        h[i] += Math.max(-turn * 2, Math.min(turn * 2, away));
+        if (lead === i) this.gt[i] = 0;
+      } else if (this.inside(nx, nz)) { x[i] = nx; z[i] = nz; }
       else {
         // At the edge: hold this step and turn back toward the middle.
         const back = angleDelta(h[i], Math.atan2(area.x - x[i], area.z - z[i]));
@@ -329,8 +380,10 @@ export class Swarm {
       // Accumulate the phase, so a change of beat (calm → flee) never jumps.
       const gliding = this.glide > 0 && !fleeing && p[i] < -.04;
       this.phase[i] = (this.phase[i] + dt * (this.beat + v[i] * this.beatPerSpeed) * (this.quiet ? .6 : 1) * (gliding ? .25 : 1) * TAU) % TAU;
-      const target = fleeing ? this.fleeAmplitude : gliding ? this.amplitude * this.glide : this.amplitude;
+      const target = onGround && !fleeing ? .01 : fleeing ? this.fleeAmplitude : gliding ? this.amplitude * this.glide : this.amplitude;
       this.amp[i] += (target - this.amp[i]) * easeAmp;
+      // Pecking: the head bobs down while paused on the ground.
+      this.nod[i] = onGround && this.pause[i] > 0 ? Math.max(0, Math.sin(this.time * 9 + i)) * .5 : this.nod[i] * (1 - ease);
     }
     this.write(n);
   }
@@ -339,7 +392,7 @@ export class Swarm {
   write(n = this.count) {
     const m = this.mesh.instanceMatrix.array, { x, y, z, h, p, r } = this;
     for (let i = 0; i < n; i++) {
-      const s = this.size[i], ax = -p[i], a = Math.cos(ax), b = Math.sin(ax), c = Math.cos(h[i]), d = Math.sin(h[i]), e = Math.cos(r[i]), f = Math.sin(r[i]);
+      const s = this.size[i], ax = -p[i] + this.nod[i], a = Math.cos(ax), b = Math.sin(ax), c = Math.cos(h[i]), d = Math.sin(h[i]), e = Math.cos(r[i]), f = Math.sin(r[i]);
       const ce = c * e, cf = c * f, de = d * e, df = d * f, o = i * 16;
       m[o] = (ce + df * b) * s; m[o + 1] = a * f * s; m[o + 2] = (cf * b - de) * s; m[o + 3] = 0;
       m[o + 4] = (de * b - cf) * s; m[o + 5] = a * e * s; m[o + 6] = (df + ce * b) * s; m[o + 7] = 0;
@@ -376,7 +429,7 @@ function dot() {
 // (petals, confetti, rain). Positions are a pure function of time and a per-mote seed.
 export class Motes {
   constructor({ name = "motes", count = 80, box, kind = "drift", speed = .3, wobble = .4, size = .08, colors = [0xffffff],
-    opacity = .8, additive = false, streak = 0, seed = 7 }) {
+    opacity = .8, additive = false, streak = 0, rate = 1, seed = 7 }) {
     this.count = count;
     const rng = mulberry32(seed), positions = new Float32Array(count * 3), seeds = new Float32Array(count * 4), tint = new Float32Array(count * 3), color = new THREE.Color();
     for (let i = 0; i < count; i++) {
@@ -389,7 +442,7 @@ export class Motes {
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 4));
     geometry.setAttribute("color", new THREE.BufferAttribute(tint, 3));
-    this.uniforms = { uTime: { value: 0 }, uSpeed: { value: kind === "drift" ? speed : speed }, uWobble: { value: wobble }, uSpan: { value: box.y1 - box.y0 }, uFloor: { value: box.y0 }, uStreak: { value: streak } };
+    this.uniforms = { uTime: { value: 0 }, uSpeed: { value: kind === "drift" ? speed : speed }, uWobble: { value: wobble }, uSpan: { value: box.y1 - box.y0 }, uFloor: { value: box.y0 }, uStreak: { value: streak }, uRate: { value: rate } };
     const material = new THREE.PointsMaterial({ size, map: dot(), vertexColors: true, transparent: true, opacity, depthWrite: false,
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending });
     const travel = kind === "rise" ? "1." : kind === "fall" ? "-1." : "0.";
@@ -397,9 +450,9 @@ export class Motes {
       Object.assign(shader.uniforms, this.uniforms);
       shader.vertexShader = shader.vertexShader
         .replace("#include <common>", `#include <common>
-attribute vec4 aSeed; uniform float uTime, uSpeed, uWobble, uSpan, uFloor, uStreak; varying float vFade;`)
+attribute vec4 aSeed; uniform float uTime, uSpeed, uWobble, uSpan, uFloor, uStreak, uRate; varying float vFade;`)
         .replace("#include <begin_vertex>", `#include <begin_vertex>
-float t = uTime * (.6 + aSeed.x * .8);
+float t = uTime * uRate * (.6 + aSeed.x * .8);
 transformed.x += sin(t * .7 + aSeed.y * 6.283) * uWobble + sin(t * 1.9 + aSeed.z * 9.) * uWobble * .3;
 transformed.z += cos(t * .6 + aSeed.w * 6.283) * uWobble;
 float lift = ${travel} * uSpeed * uTime * (.7 + aSeed.y * .6);
@@ -513,18 +566,19 @@ const GEOMETRY = {
   bird: options => birdGeometry(options),
   butterfly: () => butterflyGeometry(),
   jelly: () => jellyGeometry(),
+  turtle: () => turtleGeometry(),
 };
 
 export class Life {
   // sizeScale: creatures are sized for the desktop camera; portrait phones see the world from
   // further away, so the same pixels need bigger (still toy-proportioned) creatures and motes.
-  constructor(parent, recipe, { scenery = null, budget = 1, sizeScale = 1 } = {}) {
+  constructor(parent, recipe, { scenery = null, budget = 1, sizeScale = 1, obstacles = null } = {}) {
     this.group = new THREE.Group();
     this.group.name = "Ambient life";
     parent.add(this.group);
     this.swarms = []; this.motes = []; this.sway = null;
     for (const spec of recipe.swarms || []) {
-      const swarm = new Swarm({ ...spec, length: (spec.length ?? .6) * sizeScale, geometry: GEOMETRY[spec.shape](spec.shapeOptions) });
+      const swarm = new Swarm({ ...spec, obstacles, length: (spec.length ?? .6) * sizeScale, geometry: GEOMETRY[spec.shape](spec.shapeOptions) });
       this.swarms.push(swarm); this.group.add(swarm.mesh);
     }
     for (const spec of recipe.motes || []) {
