@@ -1,3 +1,5 @@
+import { paintUniforms } from "./bake.js";
+
 export const PAINTS = {
   lagoon: { name: "Lagoon blue", shell: 0x26bed9, accent: 0xffcb52 },
   sunset: { name: "Sunset coral", shell: 0xff766f, accent: 0x63f6ed },
@@ -58,6 +60,14 @@ export function dressRobot(world, actor, equipment) {
   // material must never be recolored globally.
   actor.traverse(child => {
     if (!child.isMesh || !child.material?.name) return;
+    // Baked parts carry paint slots: give this robot its own material, then set two colours.
+    if (child.material.userData.paintSlots) {
+      if (!child.userData.ownedPaint && !child.userData.ownedStencil) child.material = child.material.clone();
+      child.userData.ownedPaint = true;
+      const uniforms = paintUniforms(child.material);
+      uniforms.uShell.value.setHex(paint.shell); uniforms.uAccent.value.setHex(paint.accent);
+      return;
+    }
     const name = child.material.name;
     if (!name.startsWith("Ceramic White") && !name.startsWith("Aurora Cyan")) return;
     if (!child.userData.ownedPaint && !child.userData.ownedStencil) child.material = child.material.clone();

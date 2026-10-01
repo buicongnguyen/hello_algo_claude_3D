@@ -325,7 +325,22 @@ GPU memory stays flat across stage cycles: 155 geometries (previously 236, becau
 
 These are the same one-draw-call kinds as before. Wings fold while a bird walks, and the head nods while it pecks.
 
-**Next step, not done:** KAI keeps its paint-recolourable parts separate (22 → 15 meshes). Moving the paint system to per-vertex tint would bring KAI to about 6.
+**Paint in the bake:**
+
+- KAI's and its gear's paint-recolourable parts are now baked too. Each vertex carries a paint slot (fixed, shell or accent), and the merged material swaps in that robot's colours. The accent glow follows the accent colour.
+- Paint colours live on each material instance, so the Workshop preview, KAI and the cached model paint independently.
+- Draw counts:
+  - KAI with armor, thrusters and antenna: 9 meshes (KAI alone was 22 before baking).
+  - Real draws: beach combat 148 → 131, Beach Brawl 116 → 93, reef 134 → 111, city 106 → 83.
+  - No frames over 50 ms; 95th percentile 13–21 ms at CPU ÷4.
+
+**A bug found and fixed in this pass:** three's `Material.clone()` drops `onBeforeCompile` and `customProgramCacheKey`. The game clones materials per robot (hit flashes, tints, silhouettes, paint), so clones lost the bake patch. Robots rendered without their baked finishes and glow, which was visible in the build briefly deployed as c1dbde7.
+
+- Baked materials now override `clone()` to keep the patch, and a unit test guards it.
+- The frozen line-up check now goes through the game's real per-robot paths: enemies clone their materials, KAI gets its silhouette.
+- Against the pre-bake build:
+  - the broken build differed in 112,696 of 840,000 pixels;
+  - the fixed build differs in 51 (same-build noise: 18).
 
 ## 6. Remaining gates to AAA
 
