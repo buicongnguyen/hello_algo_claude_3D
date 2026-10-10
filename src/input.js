@@ -51,6 +51,8 @@ export class InputController {
     });
     window.addEventListener("keyup", event => this.keys.delete(event.code));
     window.addEventListener("blur", () => this.clear());
+window.addEventListener('pagehide', () => this.clear());
+window.addEventListener('mobile-game-interruption', () => this.clear());
   }
 
   bindTouch() {

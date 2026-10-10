@@ -1,0 +1,10 @@
+{
+  "name": "Robot Beach 3D: Signalbreak",
+  "short_name": "Robot Beach 3D: Signalbr",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#172528",
+  "theme_color": "#172528"
+}

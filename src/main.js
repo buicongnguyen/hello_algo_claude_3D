@@ -1,3 +1,4 @@
+import './mobile-game-init.mjs';
 import "./styles.css";
 import { World } from "./world.js";
 import { InputController } from "./input.js";
@@ -122,5 +123,7 @@ document.addEventListener("visibilitychange", () => {
 });
 // Losing window focus (another window, a system dialog) pauses too, so timers and enemies never run unattended.
 window.addEventListener("blur", () => { if (game.running && !game.paused) game.pause(); });
+window.addEventListener('pagehide', () => { if (game.running && !game.paused) game.pause(); });
+window.addEventListener('mobile-game-interruption', () => { if (game.running && !game.paused) game.pause(); });
 
 window.__ROBOT_BEACH__ = { world, game, ui, input, catalog: ALL_STAGES, brawl: BRAWL, expeditions: EXPEDITIONS };
